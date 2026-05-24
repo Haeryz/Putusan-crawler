@@ -97,6 +97,9 @@ def looks_like_challenge(html: str, title: str | None = None) -> bool:
 def _find_next_url(soup: BeautifulSoup, base_url: str) -> str | None:
     candidates = soup.find_all("a", href=True)
     for anchor in candidates:
+        href = str(anchor["href"]).strip()
+        if not href or href == "#":
+            continue
         rel = anchor.get("rel") or []
         text = anchor.get_text(" ", strip=True).lower()
         classes = " ".join(anchor.get("class") or []).lower()
@@ -108,6 +111,6 @@ def _find_next_url(soup: BeautifulSoup, base_url: str) -> str | None:
             or "next" in classes
             or label in {"next", "selanjutnya", "berikutnya"}
         ):
-            return urljoin(base_url, str(anchor["href"]).strip())
+            return urljoin(base_url, href)
 
     return None

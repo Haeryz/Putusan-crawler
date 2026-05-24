@@ -25,6 +25,27 @@ def test_parse_listing_extracts_case_links_and_next() -> None:
     )
 
 
+def test_parse_listing_extracts_rel_next_from_pagination() -> None:
+    html = """
+    <ul class="pagination justify-content-center">
+      <li class="page-item active"><a class="page-link" href="#">1</a></li>
+      <li class="page-item"><a href="https://putusan3.mahkamahagung.go.id/direktori/index/kategori/pidana-khusus-1/page/2.html" class="page-link" data-ci-pagination-page="2">2</a></li>
+      <li class="page-item"><a href="#" aria-label="Next"></a><a href="https://putusan3.mahkamahagung.go.id/direktori/index/kategori/pidana-khusus-1/page/2.html" class="page-link" data-ci-pagination-page="2" rel="next">Next</a></li>
+      <li class="page-item"><a href="#" aria-label="Next"></a><a href="https://putusan3.mahkamahagung.go.id/direktori/index/kategori/pidana-khusus-1/page/499.html" class="page-link" data-ci-pagination-page="499">Last</a></li>
+    </ul>
+    """
+
+    links = parse_listing(
+        html,
+        "https://putusan3.mahkamahagung.go.id/direktori/index/kategori/pidana-khusus-1.html",
+    )
+
+    assert (
+        links.next_url
+        == "https://putusan3.mahkamahagung.go.id/direktori/index/kategori/pidana-khusus-1/page/2.html"
+    )
+
+
 def test_parse_pdf_link_from_goal_snippet() -> None:
     html = """
     <ul class="portfolio-meta nobottommargin">

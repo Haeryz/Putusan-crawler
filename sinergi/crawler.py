@@ -254,6 +254,18 @@ class PutusanCrawler:
                 failed_downloads += 1
             self.store.append(result)
 
+        if listing_url and self.config.browser_backend == "managed-chrome":
+            return self._crawl_listing_by_clicks(
+                context,
+                page,
+                listing_url,
+                downloaded_urls,
+                visited_this_run,
+                candidate_count,
+                output_paths,
+                failed_downloads,
+            )
+
         while listing_url and len(output_paths) < self.config.target_downloads:
             self._goto_and_wait(page, listing_url)
             listing_html = page.content()
@@ -286,6 +298,65 @@ class PutusanCrawler:
             listing_url = links.next_url
 
         return self._summary(output_paths, failed_downloads)
+
+    def _crawl_listing_by_clicks(
+        self,
+        context: BrowserContext,
+        page: Page,
+        listing_url: str,
+        downloaded_urls: set[str],
+        visited_this_run: set[str],
+        candidate_count: int,
+        output_paths: list[Path],
+        failed_downloads: int,
+    ) -> CrawlSummary:
+        while listing_url and len(output_paths) < self.config.target_downloads:
+            self._goto_and_wait(page, listing_url)
+            current_listing_url = page.url
+            listing_html = page.content()
+            links = parse_listing(listing_html, current_listing_url)
+            self.store.log(
+                f"managed-listing-clicks url={current_listing_url} "
+                f"cases={len(links.case_urls)} next={links.next_url}"
+            )
+
+            for detail_url in links.case_urls:
+                if len(output_paths) >= self.config.target_downloads:
+                    break
+                if self._candidate_limit_reached(candidate_count):
+                    return self._summary(output_paths, failed_downloads)
+                if detail_url in downloaded_urls or detail_url in visited_this_run:
+                    continue
+
+                candidate_count += 1
+                visited_this_run.add(detail_url)
+                result = self._download_case_by_click(context, page, detail_url)
+                if result.status == "downloaded" and result.output_path:
+                    output_paths.append(Path(result.output_path))
+                    downloaded_urls.add(detail_url)
+                elif result.status == "error":
+                    failed_downloads += 1
+                self.store.append(result)
+
+                if len(output_paths) >= self.config.target_downloads:
+                    break
+
+                self._return_to_listing(page, current_listing_url)
+                if self.config.delay_seconds:
+                    page.wait_for_timeout(int(self.config.delay_seconds * 1000))
+
+            listing_url = links.next_url
+
+        return self._summary(output_paths, failed_downloads)
+
+    def _return_to_listing(self, page: Page, listing_url: str) -> None:
+        if page.url == listing_url:
+            return
+        try:
+            page.go_back(wait_until="domcontentloaded", timeout=self.config.timeout_seconds * 1000)
+            self._wait_for_accessible_page(page)
+        except PlaywrightError:
+            self._goto_and_wait(page, listing_url)
 
     def _run_undetected_chrome(self) -> CrawlSummary:
         if self.config.parallel_downloads > 1:
@@ -934,31 +1005,7 @@ class PutusanCrawler:
         for attempt in range(1, self.config.retry_attempts + 1):
             try:
                 self._goto_and_wait(page, detail_url)
-                html = page.content()
-                title = parse_title(html)
-                pdf_link = parse_pdf_link(html, page.url)
-                if not pdf_link:
-                    return CrawlRecord(
-                        status="skipped_no_pdf",
-                        detail_url=detail_url,
-                        title=title,
-                        error="no PDF download link found",
-                    )
-                _ensure_allowed_pdf_url(pdf_link.url)
-
-                fallback_stem = self._fallback_stem(detail_url)
-                filename = sanitize_filename(pdf_link.filename, fallback_stem)
-                output_path = unique_path(self.pdf_dir / filename)
-                self._save_pdf(context, page, pdf_link.url, output_path)
-                verify_pdf(output_path)
-                return CrawlRecord(
-                    status="downloaded",
-                    detail_url=detail_url,
-                    pdf_url=pdf_link.url,
-                    output_path=str(output_path),
-                    title=title,
-                    filename=output_path.name,
-                )
+                return self._download_current_detail(context, page, detail_url)
             except Exception as exc:  # noqa: BLE001 - we need to keep crawling.
                 last_error = exc
                 self.store.log(
@@ -970,6 +1017,78 @@ class PutusanCrawler:
             status="error",
             detail_url=detail_url,
             error=f"{type(last_error).__name__}: {last_error}",
+        )
+
+    def _download_case_by_click(
+        self, context: BrowserContext, page: Page, detail_url: str
+    ) -> CrawlRecord:
+        last_error: Exception | None = None
+        _ensure_allowed_detail_url(detail_url)
+        for attempt in range(1, self.config.retry_attempts + 1):
+            try:
+                self._click_detail_link(page, detail_url)
+                return self._download_current_detail(context, page, detail_url)
+            except Exception as exc:  # noqa: BLE001 - keep crawling after bad cases.
+                last_error = exc
+                self.store.log(
+                    f"click-attempt={attempt} detail_url={detail_url} "
+                    f"error={type(exc).__name__}: {exc}"
+                )
+                time.sleep(min(2 * attempt, 10))
+
+        return CrawlRecord(
+            status="error",
+            detail_url=detail_url,
+            error=f"{type(last_error).__name__}: {last_error}",
+        )
+
+    def _click_detail_link(self, page: Page, detail_url: str) -> None:
+        clicked = page.evaluate(
+            """
+            (url) => {
+                const links = Array.from(document.querySelectorAll("a[href]"));
+                const link = links.find((node) => node.href === url);
+                if (!link) return false;
+                link.scrollIntoView({block: "center", inline: "center"});
+                link.click();
+                return true;
+            }
+            """,
+            detail_url,
+        )
+        if not clicked:
+            raise RuntimeError(f"detail link is not present on the listing page: {detail_url}")
+        page.wait_for_url("**/direktori/putusan/*.html", wait_until="domcontentloaded")
+        self._wait_for_accessible_page(page)
+
+    def _download_current_detail(
+        self, context: BrowserContext, page: Page, expected_detail_url: str
+    ) -> CrawlRecord:
+        actual_detail_url = page.url if _is_allowed_detail_url(page.url) else expected_detail_url
+        html = page.content()
+        title = parse_title(html)
+        pdf_link = parse_pdf_link(html, page.url)
+        if not pdf_link:
+            return CrawlRecord(
+                status="skipped_no_pdf",
+                detail_url=actual_detail_url,
+                title=title,
+                error="no PDF download link found",
+            )
+        _ensure_allowed_pdf_url(pdf_link.url)
+
+        fallback_stem = self._fallback_stem(actual_detail_url)
+        filename = sanitize_filename(pdf_link.filename, fallback_stem)
+        output_path = unique_path(self.pdf_dir / filename)
+        self._save_pdf(context, page, pdf_link.url, output_path)
+        verify_pdf(output_path)
+        return CrawlRecord(
+            status="downloaded",
+            detail_url=actual_detail_url,
+            pdf_url=pdf_link.url,
+            output_path=str(output_path),
+            title=title,
+            filename=output_path.name,
         )
 
     def _save_pdf(
