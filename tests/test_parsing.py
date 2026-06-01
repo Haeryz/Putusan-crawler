@@ -1,4 +1,9 @@
-from sinergi.parsing import looks_like_challenge, parse_listing, parse_pdf_link
+from crawler.parsing import (
+    looks_like_challenge,
+    parse_listing,
+    parse_listing_last_page_index,
+    parse_pdf_link,
+)
 
 
 def test_parse_listing_extracts_case_links_and_next() -> None:
@@ -23,6 +28,13 @@ def test_parse_listing_extracts_case_links_and_next() -> None:
         links.next_url
         == "https://putusan3.mahkamahagung.go.id/direktori/index/kategori/pidana-khusus-1/page/2.html"
     )
+    assert (
+        parse_listing_last_page_index(
+            html,
+            "https://putusan3.mahkamahagung.go.id/direktori/index/kategori/pidana-khusus-1.html",
+        )
+        == 1
+    )
 
 
 def test_parse_listing_extracts_rel_next_from_pagination() -> None:
@@ -43,6 +55,54 @@ def test_parse_listing_extracts_rel_next_from_pagination() -> None:
     assert (
         links.next_url
         == "https://putusan3.mahkamahagung.go.id/direktori/index/kategori/pidana-khusus-1/page/2.html"
+    )
+    assert (
+        parse_listing_last_page_index(
+            html,
+            "https://putusan3.mahkamahagung.go.id/direktori/index/kategori/pidana-khusus-1.html",
+        )
+        == 499
+    )
+
+
+def test_parse_listing_filters_to_pn_and_skips_unpublish_before_footer_items() -> None:
+    html = """
+    <article>
+      <a href="/direktori/putusan/ma.html">Putusan MAHKAMAH AGUNG Nomor 1 K/PID.SUS/2026</a>
+      <p>Upload : 18-04-2026</p>
+    </article>
+    <article>
+      <a href="/direktori/putusan/pn.html">Putusan PN GARUT Nomor 5/Pid.Sus-Anak/2026/PN Grt</a>
+      <p>Tanggal 11 Maret 2026 - Terdakwa</p>
+    </article>
+    <article>
+      <a href="/direktori/putusan/pt.html">Putusan PT BANTEN Nomor 9/PID.SUS-Anak/2022/PT BTN</a>
+      <p>Tanggal 8 Desember 2022</p>
+    </article>
+    <article>
+      <a href="/direktori/putusan/unpublish.html">Putusan PN SERANG Nomor 13/Pid.Sus-Anak/2019/PN Srg</a>
+      <p>Unpublish</p>
+    </article>
+    <ul class="pagination">
+      <li><a class="page-link" href="/direktori/index/kategori/peradilan-anak-abh-1/page/2.html">Next</a></li>
+    </ul>
+    <aside>
+      <a href="/direktori/putusan/footer.html">Putusan PN CURUP Nomor 2/Pid.Sus-Anak/2022/PN Crp</a>
+    </aside>
+    """
+
+    links = parse_listing(
+        html,
+        "https://putusan3.mahkamahagung.go.id/direktori/index/kategori/peradilan-anak-abh-1.html",
+        case_title_prefix="Putusan PN",
+    )
+
+    assert links.case_urls == [
+        "https://putusan3.mahkamahagung.go.id/direktori/putusan/pn.html",
+    ]
+    assert (
+        links.next_url
+        == "https://putusan3.mahkamahagung.go.id/direktori/index/kategori/peradilan-anak-abh-1/page/2.html"
     )
 
 

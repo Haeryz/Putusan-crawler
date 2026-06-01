@@ -1,4 +1,4 @@
-from sinergi.cli import main
+from crawler.cli import main
 
 
 if __name__ == "__main__":

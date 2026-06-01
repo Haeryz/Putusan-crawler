@@ -44,6 +44,8 @@ uv run sinergi crawl --detail-file detail-urls.txt --no-listing --target-downloa
 uv run sinergi crawl --chrome-profile "Profile 4" --target-downloads 10
 uv run sinergi crawl --manual-clearance-timeout-seconds 600 --target-downloads 10
 uv run sinergi crawl --no-refresh-profile-snapshot --target-downloads 10
+uv run sinergi crawl --target-downloads 100 --parallel-downloads 16 --no-refresh-profile-snapshot
+uv run sinergi crawl --target-downloads 100 --parallel-downloads 32 --fast-fetch-timeout-seconds 10 --no-refresh-profile-snapshot
 uv run sinergi crawl --chrome-version-main 148 --target-downloads 10
 uv run sinergi crawl --browser-backend playwright --browser-channel chrome --target-downloads 10
 ```

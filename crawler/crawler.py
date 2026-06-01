@@ -23,7 +23,13 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
-from .parsing import looks_like_challenge, parse_listing, parse_pdf_link, parse_title
+from .parsing import (
+    looks_like_challenge,
+    parse_listing,
+    parse_listing_last_page_index,
+    parse_pdf_link,
+    parse_title,
+)
 from .storage import CrawlRecord, JsonlStore, sanitize_filename, unique_path, verify_pdf
 
 DEFAULT_START_URL = (
@@ -43,6 +49,7 @@ class CrawlConfig:
     out_dir: Path = Path("downloads")
     profile_dir: Path = Path(".browser-profile")
     target_downloads: int = 10
+    download_all: bool = False
     headless: bool = True
     timeout_seconds: int = 120
     max_candidates: int | None = None
@@ -61,16 +68,39 @@ class CrawlConfig:
     chrome_profile: str = "Profile 4"
     manual_clearance_timeout_seconds: int = 300
     refresh_profile_snapshot: bool = True
+    fast_fetch_timeout_seconds: int = 15
+    count_parallel_pages: int = 16
+    case_title_prefix: str | None = None
+    skip_unpublished_listing_items: bool = True
 
 
 @dataclass(frozen=True)
 class CrawlSummary:
     downloaded: int
-    target: int
+    target: int | None
     failed_downloads: int
     output_paths: list[Path]
     elapsed_seconds: float | None = None
     metrics: dict[str, float | int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class InventoryPage:
+    page_index: int
+    listing_url: str
+    downloadable: int
+    already_downloaded: int
+    remaining: int
+    detail_urls: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CrawlInventory:
+    total_downloadable: int
+    pages_scanned: int
+    already_downloaded: int
+    remaining: int
+    pages: list[InventoryPage]
 
 
 @dataclass(frozen=True)
@@ -97,6 +127,285 @@ class PutusanCrawler:
             return self._run_playwright_cdp()
         raise ValueError(f"unknown browser backend: {self.config.browser_backend}")
 
+    def _target_reached(self, output_paths: list[Path]) -> bool:
+        return not self.config.download_all and len(output_paths) >= self.config.target_downloads
+
+    def _summary_target(self) -> int | None:
+        return None if self.config.download_all else self.config.target_downloads
+
+    def count_downloadable(self) -> CrawlInventory:
+        self.store.prepare()
+        if self.config.browser_backend == "managed-chrome":
+            return self._count_with_managed_chrome()
+        if self.config.browser_backend == "playwright":
+            return self._count_with_playwright()
+        if self.config.browser_backend == "playwright-cdp":
+            return self._count_with_playwright_cdp()
+        raise ValueError(
+            f"count-only mode does not support browser backend: {self.config.browser_backend}"
+        )
+
+    def _count_with_managed_chrome(self) -> CrawlInventory:
+        chrome_process, port = self._launch_managed_chrome()
+        should_close_chrome = True
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+            context = browser.contexts[0] if browser.contexts else browser.new_context()
+            page = context.pages[0] if context.pages else context.new_page()
+            page.set_default_timeout(self.config.timeout_seconds * 1000)
+
+            try:
+                return self._count_with_page(page)
+            except Exception:
+                if self.config.keep_browser_open_on_error:
+                    should_close_chrome = False
+                    print("Debug: leaving managed Chrome open after count error.")
+                    self._debug_hold_playwright_context(context)
+                raise
+            finally:
+                if should_close_chrome:
+                    with suppress(Exception):
+                        self._terminate_chrome_process(chrome_process)
+                with suppress(Exception):
+                    browser.close()
+
+    def _count_with_playwright(self) -> CrawlInventory:
+        with sync_playwright() as playwright:
+            context = playwright.chromium.launch_persistent_context(
+                str(self.config.profile_dir),
+                headless=self.config.headless,
+                accept_downloads=False,
+                viewport={"width": 1366, "height": 900},
+                channel=self.config.browser_channel,
+                args=["--disable-quic"],
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+            page.set_default_timeout(self.config.timeout_seconds * 1000)
+
+            try:
+                return self._count_with_page(page)
+            finally:
+                context.close()
+
+    def _count_with_playwright_cdp(self) -> CrawlInventory:
+        chrome_process, port = self._launch_visible_chrome_for_cdp()
+        should_close_chrome = True
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+            context = browser.contexts[0] if browser.contexts else browser.new_context()
+            page = context.pages[0] if context.pages else context.new_page()
+            page.set_default_timeout(self.config.timeout_seconds * 1000)
+
+            try:
+                return self._count_with_page(page)
+            except Exception:
+                if self.config.keep_browser_open_on_error:
+                    should_close_chrome = False
+                    print("Debug: leaving visible CDP Chrome open after count error.")
+                    self._debug_hold_playwright_context(context)
+                raise
+            finally:
+                with suppress(Exception):
+                    browser.close()
+                if should_close_chrome:
+                    with suppress(Exception):
+                        self._terminate_chrome_process(chrome_process)
+
+    def _count_with_page(self, page: Page) -> CrawlInventory:
+        if page is not None and self.config.count_parallel_pages > 1:
+            try:
+                return self._count_with_page_fast(page)
+            except Exception as exc:  # noqa: BLE001 - preserve correctness if fast fetch is blocked.
+                self.store.log(
+                    f"count-fast-fallback error={type(exc).__name__}: {exc}"
+                )
+
+        downloaded_urls = self.store.downloaded_detail_urls()
+        listing_url: str | None = self.config.start_url if self.config.crawl_listing else None
+        seen_listing_urls: set[str] = set()
+        seen_detail_urls: set[str] = set()
+        pages: list[InventoryPage] = []
+
+        while listing_url:
+            if listing_url in seen_listing_urls:
+                self.store.log(f"count-stopped-duplicate-listing url={listing_url}")
+                break
+            if self._candidate_limit_reached(len(seen_detail_urls)):
+                break
+
+            seen_listing_urls.add(listing_url)
+            page_index = len(pages) + 1
+            html, current_url = self._load_listing_for_count(page, listing_url, page_index)
+            links = self._parse_listing(html, current_url)
+
+            page_urls: list[str] = []
+            for detail_url in links.case_urls:
+                if self._candidate_limit_reached(len(seen_detail_urls)):
+                    break
+                if detail_url in seen_detail_urls:
+                    continue
+                seen_detail_urls.add(detail_url)
+                page_urls.append(detail_url)
+
+            already_downloaded = sum(1 for url in page_urls if url in downloaded_urls)
+            pages.append(
+                InventoryPage(
+                    page_index=page_index,
+                    listing_url=current_url,
+                    downloadable=len(page_urls),
+                    already_downloaded=already_downloaded,
+                    remaining=len(page_urls) - already_downloaded,
+                    detail_urls=page_urls,
+                )
+            )
+            self.store.log(
+                f"count-listing page={page_index} url={current_url} "
+                f"cases={len(page_urls)} next={links.next_url}"
+            )
+
+            listing_url = links.next_url
+
+        already_downloaded = sum(1 for url in seen_detail_urls if url in downloaded_urls)
+        return CrawlInventory(
+            total_downloadable=len(seen_detail_urls),
+            pages_scanned=len(pages),
+            already_downloaded=already_downloaded,
+            remaining=len(seen_detail_urls) - already_downloaded,
+            pages=pages,
+        )
+
+    def _count_with_page_fast(self, page: Page) -> CrawlInventory:
+        downloaded_urls = self.store.downloaded_detail_urls()
+        listing_url: str | None = self.config.start_url if self.config.crawl_listing else None
+        if not listing_url:
+            return CrawlInventory(
+                total_downloadable=0,
+                pages_scanned=0,
+                already_downloaded=0,
+                remaining=0,
+                pages=[],
+            )
+
+        self._goto_and_wait(page, listing_url)
+        first_html = self._safe_page_content(page)
+        first_url = page.url
+        last_page_index = parse_listing_last_page_index(first_html, first_url)
+        if last_page_index <= 1:
+            links = self._parse_listing(first_html, first_url)
+            if links.next_url:
+                raise RuntimeError("fast count could not discover the last listing page")
+
+        seen_detail_urls: set[str] = set()
+        pages: list[InventoryPage] = []
+
+        first_links = self._parse_listing(first_html, first_url)
+        self._append_inventory_page(
+            pages,
+            page_index=1,
+            listing_url=first_url,
+            case_urls=first_links.case_urls,
+            seen_detail_urls=seen_detail_urls,
+            downloaded_urls=downloaded_urls,
+        )
+        self.store.log(
+            f"count-listing-fast page=1 url={first_url} "
+            f"cases={pages[-1].downloadable if pages else 0} last={last_page_index}"
+        )
+
+        next_page_index = 2
+        while (
+            next_page_index <= last_page_index
+            and not self._candidate_limit_reached(len(seen_detail_urls))
+        ):
+            batch_end = min(
+                last_page_index,
+                next_page_index + self.config.count_parallel_pages - 1,
+            )
+            batch_urls = [
+                _listing_page_url(self.config.start_url, page_index)
+                for page_index in range(next_page_index, batch_end + 1)
+            ]
+            results = self._fetch_listing_pages_with_page(page, batch_urls)
+            for offset, result in enumerate(results):
+                page_index = next_page_index + offset
+                if self._candidate_limit_reached(len(seen_detail_urls)):
+                    break
+                html = str(result["text"])
+                current_url = str(result["url"])
+                links = self._parse_listing(html, current_url)
+                before_count = len(seen_detail_urls)
+                self._append_inventory_page(
+                    pages,
+                    page_index=page_index,
+                    listing_url=current_url,
+                    case_urls=links.case_urls,
+                    seen_detail_urls=seen_detail_urls,
+                    downloaded_urls=downloaded_urls,
+                )
+                self.store.log(
+                    f"count-listing-fast page={page_index} url={current_url} "
+                    f"cases={len(seen_detail_urls) - before_count} last={last_page_index}"
+                )
+            next_page_index = batch_end + 1
+
+        already_downloaded = sum(1 for url in seen_detail_urls if url in downloaded_urls)
+        return CrawlInventory(
+            total_downloadable=len(seen_detail_urls),
+            pages_scanned=len(pages),
+            already_downloaded=already_downloaded,
+            remaining=len(seen_detail_urls) - already_downloaded,
+            pages=pages,
+        )
+
+    def _append_inventory_page(
+        self,
+        pages: list[InventoryPage],
+        *,
+        page_index: int,
+        listing_url: str,
+        case_urls: list[str],
+        seen_detail_urls: set[str],
+        downloaded_urls: set[str],
+    ) -> None:
+        page_urls: list[str] = []
+        for detail_url in case_urls:
+            if self._candidate_limit_reached(len(seen_detail_urls)):
+                break
+            if detail_url in seen_detail_urls:
+                continue
+            seen_detail_urls.add(detail_url)
+            page_urls.append(detail_url)
+
+        already_downloaded = sum(1 for url in page_urls if url in downloaded_urls)
+        pages.append(
+            InventoryPage(
+                page_index=page_index,
+                listing_url=listing_url,
+                downloadable=len(page_urls),
+                already_downloaded=already_downloaded,
+                remaining=len(page_urls) - already_downloaded,
+                detail_urls=page_urls,
+            )
+        )
+
+    def _load_listing_for_count(
+        self, page: Page, listing_url: str, page_index: int
+    ) -> tuple[str, str]:
+        if page_index == 1:
+            self._goto_and_wait(page, listing_url)
+            return self._safe_page_content(page), page.url
+
+        try:
+            return self._fetch_html_with_page(page, listing_url), listing_url
+        except Exception as exc:  # noqa: BLE001 - fall back to a normal browser navigation.
+            self.store.log(
+                f"count-fetch-fallback url={listing_url} error={type(exc).__name__}: {exc}"
+            )
+            self._goto_and_wait(page, listing_url)
+            return self._safe_page_content(page), page.url
+
     def _run_managed_chrome(self) -> CrawlSummary:
         self.store.prepare()
         chrome_process, port = self._launch_managed_chrome()
@@ -118,11 +427,11 @@ class PutusanCrawler:
                     self._debug_hold_playwright_context(context)
                 raise
             finally:
-                with suppress(Exception):
-                    browser.close()
                 if should_close_chrome:
                     with suppress(Exception):
-                        chrome_process.terminate()
+                        self._terminate_chrome_process(chrome_process)
+                with suppress(Exception):
+                    browser.close()
 
     def _run_playwright(self) -> CrawlSummary:
         self.store.prepare()
@@ -147,7 +456,7 @@ class PutusanCrawler:
 
             try:
                 for detail_url in self.config.detail_urls:
-                    if len(output_paths) >= self.config.target_downloads:
+                    if self._target_reached(output_paths):
                         break
                     if detail_url in visited_this_run:
                         continue
@@ -161,16 +470,16 @@ class PutusanCrawler:
                         failed_downloads += 1
                     self.store.append(result)
 
-                while listing_url and len(output_paths) < self.config.target_downloads:
+                while listing_url and not self._target_reached(output_paths):
                     self._goto_and_wait(page, listing_url)
-                    listing_html = page.content()
-                    links = parse_listing(listing_html, page.url)
+                    listing_html = self._safe_page_content(page)
+                    links = self._parse_listing(listing_html, page.url)
                     self.store.log(
                         f"listing url={page.url} cases={len(links.case_urls)} next={links.next_url}"
                     )
 
                     for detail_url in links.case_urls:
-                        if len(output_paths) >= self.config.target_downloads:
+                        if self._target_reached(output_paths):
                             break
                         if self._candidate_limit_reached(candidate_count):
                             return self._summary(output_paths, failed_downloads)
@@ -240,7 +549,7 @@ class PutusanCrawler:
         listing_url: str | None = self.config.start_url if self.config.crawl_listing else None
 
         for detail_url in self.config.detail_urls:
-            if len(output_paths) >= self.config.target_downloads:
+            if self._target_reached(output_paths):
                 break
             if detail_url in visited_this_run:
                 continue
@@ -255,6 +564,16 @@ class PutusanCrawler:
             self.store.append(result)
 
         if listing_url and self.config.browser_backend == "managed-chrome":
+            if self.config.parallel_downloads > 1:
+                return self._crawl_listing_by_browser_fetch(
+                    page,
+                    listing_url,
+                    downloaded_urls,
+                    visited_this_run,
+                    candidate_count,
+                    output_paths,
+                    failed_downloads,
+                )
             return self._crawl_listing_by_clicks(
                 context,
                 page,
@@ -266,16 +585,16 @@ class PutusanCrawler:
                 failed_downloads,
             )
 
-        while listing_url and len(output_paths) < self.config.target_downloads:
+        while listing_url and not self._target_reached(output_paths):
             self._goto_and_wait(page, listing_url)
-            listing_html = page.content()
-            links = parse_listing(listing_html, page.url)
+            listing_html = self._safe_page_content(page)
+            links = self._parse_listing(listing_html, page.url)
             self.store.log(
                 f"playwright-cdp-listing url={page.url} cases={len(links.case_urls)} next={links.next_url}"
             )
 
             for detail_url in links.case_urls:
-                if len(output_paths) >= self.config.target_downloads:
+                if self._target_reached(output_paths):
                     break
                 if self._candidate_limit_reached(candidate_count):
                     return self._summary(output_paths, failed_downloads)
@@ -310,18 +629,18 @@ class PutusanCrawler:
         output_paths: list[Path],
         failed_downloads: int,
     ) -> CrawlSummary:
-        while listing_url and len(output_paths) < self.config.target_downloads:
+        while listing_url and not self._target_reached(output_paths):
             self._goto_and_wait(page, listing_url)
             current_listing_url = page.url
-            listing_html = page.content()
-            links = parse_listing(listing_html, current_listing_url)
+            listing_html = self._safe_page_content(page)
+            links = self._parse_listing(listing_html, current_listing_url)
             self.store.log(
                 f"managed-listing-clicks url={current_listing_url} "
                 f"cases={len(links.case_urls)} next={links.next_url}"
             )
 
             for detail_url in links.case_urls:
-                if len(output_paths) >= self.config.target_downloads:
+                if self._target_reached(output_paths):
                     break
                 if self._candidate_limit_reached(candidate_count):
                     return self._summary(output_paths, failed_downloads)
@@ -338,7 +657,7 @@ class PutusanCrawler:
                     failed_downloads += 1
                 self.store.append(result)
 
-                if len(output_paths) >= self.config.target_downloads:
+                if self._target_reached(output_paths):
                     break
 
                 self._return_to_listing(page, current_listing_url)
@@ -348,6 +667,306 @@ class PutusanCrawler:
             listing_url = links.next_url
 
         return self._summary(output_paths, failed_downloads)
+
+    def _crawl_listing_by_browser_fetch(
+        self,
+        page: Page,
+        listing_url: str,
+        downloaded_urls: set[str],
+        visited_this_run: set[str],
+        candidate_count: int,
+        output_paths: list[Path],
+        failed_downloads: int,
+    ) -> CrawlSummary:
+        next_url: str | None = listing_url
+
+        while next_url and not self._target_reached(output_paths):
+            if self._candidate_limit_reached(candidate_count):
+                break
+
+            try:
+                self._goto_and_wait(page, next_url)
+            except Exception as exc:  # noqa: BLE001 - keep completed downloads from the run.
+                self.store.log(
+                    f"managed-listing-fast-timeout url={next_url} "
+                    f"error={type(exc).__name__}: {exc}"
+                )
+                break
+
+            html = self._safe_page_content(page)
+            current_url = page.url
+
+            links = self._parse_listing(html, current_url)
+            self.store.log(
+                f"managed-listing-fast url={current_url} cases={len(links.case_urls)} "
+                f"next={links.next_url}"
+            )
+
+            page_detail_urls: list[str] = []
+            for detail_url in links.case_urls:
+                if self._candidate_limit_reached(candidate_count):
+                    break
+                if detail_url in downloaded_urls or detail_url in visited_this_run:
+                    continue
+                candidate_count += 1
+                visited_this_run.add(detail_url)
+                page_detail_urls.append(detail_url)
+
+            max_workers = max(1, self.config.parallel_downloads)
+            for index in range(0, len(page_detail_urls), max_workers):
+                if self._target_reached(output_paths):
+                    break
+                batch = page_detail_urls[index : index + max_workers]
+                results = self._fetch_detail_pdf_batch(page, batch)
+                for result in results:
+                    record = self._record_fast_fetch_result(result)
+                    if record.status == "downloaded" and record.output_path:
+                        output_paths.append(Path(record.output_path))
+                        downloaded_urls.add(record.detail_url)
+                    elif record.status == "error":
+                        failed_downloads += 1
+                    self.store.append(record)
+                    if self._target_reached(output_paths):
+                        break
+
+            next_url = links.next_url
+
+        return self._summary(output_paths, failed_downloads)
+
+    def _fetch_html_with_page(self, page: Page, url: str) -> str:
+        _ensure_allowed_listing_url(url)
+        result = page.evaluate(
+            """
+            async (url) => {
+                const response = await fetch(url, {
+                    credentials: "include",
+                    redirect: "follow",
+                    headers: {"Accept": "text/html,*/*;q=0.8"}
+                });
+                return {
+                    ok: response.ok,
+                    status: response.status,
+                    url: response.url,
+                    text: await response.text()
+                };
+            }
+            """,
+            url,
+        )
+        if not result["ok"]:
+            raise RuntimeError(f"listing fetch failed with HTTP {result['status']}: {url}")
+        _ensure_allowed_listing_url(result["url"])
+        return str(result["text"])
+
+    def _fetch_listing_pages_with_page(
+        self, page: Page, urls: list[str]
+    ) -> list[dict[str, object]]:
+        for url in urls:
+            _ensure_allowed_listing_url(url)
+        results = page.evaluate(
+            """
+            async ({urls, concurrency, timeoutMs}) => {
+                const fetchWithTimeout = async (url) => {
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+                    try {
+                        const response = await fetch(url, {
+                            credentials: "include",
+                            redirect: "follow",
+                            headers: {"Accept": "text/html,*/*;q=0.8"},
+                            signal: controller.signal
+                        });
+                        return {
+                            ok: response.ok,
+                            status: response.status,
+                            url: response.url,
+                            text: await response.text()
+                        };
+                    } catch (error) {
+                        return {
+                            ok: false,
+                            status: 0,
+                            url,
+                            error: `${error.name || "Error"}: ${error.message || error}`,
+                            text: ""
+                        };
+                    } finally {
+                        clearTimeout(timeout);
+                    }
+                };
+
+                const results = new Array(urls.length);
+                let next = 0;
+                const workerCount = Math.max(1, Math.min(concurrency, urls.length));
+                const workers = Array.from({length: workerCount}, async () => {
+                    while (next < urls.length) {
+                        const index = next++;
+                        results[index] = await fetchWithTimeout(urls[index]);
+                    }
+                });
+                await Promise.all(workers);
+                return results;
+            }
+            """,
+            {
+                "urls": urls,
+                "concurrency": max(1, self.config.count_parallel_pages),
+                "timeoutMs": max(1, self.config.fast_fetch_timeout_seconds) * 1000,
+            },
+        )
+        for result in results:
+            if not result["ok"]:
+                raise RuntimeError(
+                    f"listing fetch failed with HTTP {result['status']}: {result['url']}"
+                )
+            _ensure_allowed_listing_url(str(result["url"]))
+        return results
+
+    def _fetch_detail_pdf_batch(self, page: Page, detail_urls: list[str]) -> list[dict[str, object]]:
+        for detail_url in detail_urls:
+            _ensure_allowed_detail_url(detail_url)
+        return page.evaluate(
+            """
+            async ({urls, concurrency, timeoutMs}) => {
+                const fetchWithTimeout = async (url, options) => {
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+                    try {
+                        return await fetch(url, {...options, signal: controller.signal});
+                    } finally {
+                        clearTimeout(timeout);
+                    }
+                };
+                const toBase64 = (buffer) => {
+                    let binary = "";
+                    const bytes = new Uint8Array(buffer);
+                    const chunkSize = 0x8000;
+                    for (let i = 0; i < bytes.length; i += chunkSize) {
+                        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+                    }
+                    return btoa(binary);
+                };
+                const parseDetail = (html, baseUrl) => {
+                    const doc = new DOMParser().parseFromString(html, "text/html");
+                    const titleNode = doc.querySelector("h1,h2,h3,.entry-title,.post-title,title");
+                    const title = titleNode ? titleNode.textContent.trim() : "";
+                    const anchors = Array.from(doc.querySelectorAll("a[href]"));
+                    const pdf = anchors.find((node) => {
+                        const href = new URL(node.getAttribute("href"), baseUrl).href;
+                        return href.includes("/direktori/download_file/") && href.includes("/pdf/");
+                    });
+                    if (!pdf) return {title, pdfUrl: null, filename: null};
+                    return {
+                        title,
+                        pdfUrl: new URL(pdf.getAttribute("href"), baseUrl).href,
+                        filename: pdf.textContent.trim() || null
+                    };
+                };
+                const fetchOne = async (detailUrl) => {
+                    try {
+                        const detailResponse = await fetchWithTimeout(detailUrl, {
+                            credentials: "include",
+                            redirect: "follow",
+                            headers: {"Accept": "text/html,*/*;q=0.8"}
+                        });
+                        const detailHtml = await detailResponse.text();
+                        if (!detailResponse.ok) {
+                            return {
+                                status: "error",
+                                detailUrl,
+                                error: `detail HTTP ${detailResponse.status}`
+                            };
+                        }
+                        const parsed = parseDetail(detailHtml, detailResponse.url);
+                        if (!parsed.pdfUrl) {
+                            return {
+                                status: "skipped_no_pdf",
+                                detailUrl: detailResponse.url,
+                                title: parsed.title,
+                                error: "no PDF download link found"
+                            };
+                        }
+                        const pdfResponse = await fetchWithTimeout(parsed.pdfUrl, {
+                            credentials: "include",
+                            redirect: "follow",
+                            headers: {"Accept": "application/pdf,*/*;q=0.8"}
+                        });
+                        const buffer = await pdfResponse.arrayBuffer();
+                        if (!pdfResponse.ok) {
+                            return {
+                                status: "error",
+                                detailUrl: detailResponse.url,
+                                pdfUrl: pdfResponse.url,
+                                title: parsed.title,
+                                filename: parsed.filename,
+                                error: `PDF HTTP ${pdfResponse.status}`
+                            };
+                        }
+                        return {
+                            status: "downloaded",
+                            detailUrl: detailResponse.url,
+                            pdfUrl: pdfResponse.url,
+                            title: parsed.title,
+                            filename: parsed.filename,
+                            contentType: pdfResponse.headers.get("content-type") || "",
+                            base64: toBase64(buffer)
+                        };
+                    } catch (error) {
+                        return {
+                            status: "error",
+                            detailUrl,
+                            error: `${error.name || "Error"}: ${error.message || error}`
+                        };
+                    }
+                };
+                const results = new Array(urls.length);
+                let next = 0;
+                const workers = Array.from({length: Math.max(1, concurrency)}, async () => {
+                    while (next < urls.length) {
+                        const index = next++;
+                        results[index] = await fetchOne(urls[index]);
+                    }
+                });
+                await Promise.all(workers);
+                return results;
+            }
+            """,
+            {
+                "urls": detail_urls,
+                "concurrency": max(1, self.config.parallel_downloads),
+                "timeoutMs": max(1, self.config.fast_fetch_timeout_seconds) * 1000,
+            },
+        )
+
+    def _record_fast_fetch_result(self, result: dict[str, object]) -> CrawlRecord:
+        detail_url = str(result.get("detailUrl") or "")
+        if result.get("status") != "downloaded":
+            return CrawlRecord(
+                status=str(result.get("status") or "error"),
+                detail_url=detail_url,
+                title=str(result.get("title") or "") or None,
+                error=str(result.get("error") or "unknown fast fetch failure"),
+            )
+
+        pdf_url = str(result.get("pdfUrl") or "")
+        _ensure_allowed_detail_url(detail_url)
+        _ensure_allowed_pdf_url(pdf_url)
+        fallback_stem = self._fallback_stem(detail_url)
+        filename = sanitize_filename(
+            str(result.get("filename") or "") or None,
+            fallback_stem,
+        )
+        output_path = unique_path(self.pdf_dir / filename)
+        output_path.write_bytes(base64.b64decode(str(result["base64"])))
+        verify_pdf(output_path)
+        return CrawlRecord(
+            status="downloaded",
+            detail_url=detail_url,
+            pdf_url=pdf_url,
+            output_path=str(output_path),
+            title=str(result.get("title") or "") or None,
+            filename=output_path.name,
+        )
 
     def _return_to_listing(self, page: Page, listing_url: str) -> None:
         if page.url == listing_url:
@@ -374,7 +993,7 @@ class PutusanCrawler:
         should_close_driver = True
         try:
             for detail_url in self.config.detail_urls:
-                if len(output_paths) >= self.config.target_downloads:
+                if self._target_reached(output_paths):
                     break
                 if detail_url in visited_this_run:
                     continue
@@ -388,17 +1007,17 @@ class PutusanCrawler:
                     failed_downloads += 1
                 self.store.append(result)
 
-            while listing_url and len(output_paths) < self.config.target_downloads:
+            while listing_url and not self._target_reached(output_paths):
                 self._uc_goto_and_wait(driver, listing_url)
                 listing_html = driver.page_source
-                links = parse_listing(listing_html, driver.current_url)
+                links = self._parse_listing(listing_html, driver.current_url)
                 self.store.log(
                     f"undetected-listing url={driver.current_url} "
                     f"cases={len(links.case_urls)} next={links.next_url}"
                 )
 
                 for detail_url in links.case_urls:
-                    if len(output_paths) >= self.config.target_downloads:
+                    if self._target_reached(output_paths):
                         break
                     if self._candidate_limit_reached(candidate_count):
                         return self._summary(output_paths, failed_downloads)
@@ -447,7 +1066,11 @@ class PutusanCrawler:
                 collected_urls, session_state = self._collect_listing_detail_urls(
                     driver,
                     self.config.start_url,
-                    self.config.target_downloads + len(downloaded_urls),
+                    (
+                        None
+                        if self.config.download_all
+                        else self.config.target_downloads + len(downloaded_urls)
+                    ),
                 )
                 detail_urls.extend(collected_urls)
             if session_state is None:
@@ -472,7 +1095,7 @@ class PutusanCrawler:
                 continue
             seen.add(detail_url)
             queue.append(detail_url)
-            if len(queue) >= self.config.target_downloads:
+            if self._target_reached(queue):
                 break
 
         output_paths: list[Path] = []
@@ -498,7 +1121,7 @@ class PutusanCrawler:
         elapsed = time.perf_counter() - started_at
         return CrawlSummary(
             downloaded=len(output_paths),
-            target=self.config.target_downloads,
+            target=self._summary_target(),
             failed_downloads=failed_downloads,
             output_paths=output_paths,
             elapsed_seconds=elapsed,
@@ -511,19 +1134,27 @@ class PutusanCrawler:
         )
 
     def _collect_listing_detail_urls(
-        self, driver, start_url: str, target_count: int
+        self, driver, start_url: str, target_count: int | None
     ) -> tuple[list[str], dict[str, object]]:
         collected: list[str] = []
         seen: set[str] = set()
         session_state: dict[str, object] | None = None
         page_index = 1
-        max_pages = max(1, (self.config.max_candidates or target_count * 3) // 20 + 2)
+        max_pages = (
+            max(1, self.config.max_candidates // 20 + 2)
+            if self.config.max_candidates is not None
+            else None
+        )
+        next_url: str | None = start_url
 
-        while len(collected) < target_count and page_index <= max_pages:
-            page_url = _listing_page_url(start_url, page_index)
-            self._uc_goto_and_wait(driver, page_url)
+        while (
+            next_url
+            and (target_count is None or len(collected) < target_count)
+            and (max_pages is None or page_index <= max_pages)
+        ):
+            self._uc_goto_and_wait(driver, next_url)
             session_state = self._requests_state_from_driver(driver)
-            links = parse_listing(driver.page_source, driver.current_url)
+            links = self._parse_listing(driver.page_source, driver.current_url)
             self.store.log(
                 f"parallel-listing page={page_index} url={driver.current_url} "
                 f"cases={len(links.case_urls)}"
@@ -533,8 +1164,9 @@ class PutusanCrawler:
                     continue
                 seen.add(detail_url)
                 collected.append(detail_url)
-                if len(collected) >= target_count:
+                if target_count is not None and len(collected) >= target_count:
                     break
+            next_url = links.next_url
             page_index += 1
 
         if session_state is None:
@@ -685,7 +1317,12 @@ class PutusanCrawler:
             args.insert(-1, "--headless=new")
 
         process = subprocess.Popen(args)
-        self._wait_for_cdp(port)
+        try:
+            self._wait_for_cdp(port)
+        except Exception:
+            with suppress(Exception):
+                self._terminate_chrome_process(process)
+            raise
         return process, port
 
     def _prepare_managed_chrome_profile(self) -> Path:
@@ -769,6 +1406,17 @@ class PutusanCrawler:
                 },
             )
 
+    @staticmethod
+    def _terminate_chrome_process(process: subprocess.Popen) -> None:
+        if process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
     def _launch_visible_chrome_for_cdp(self) -> tuple[subprocess.Popen, int]:
         chrome_path = _find_chrome_executable()
         if chrome_path is None:
@@ -791,7 +1439,12 @@ class PutusanCrawler:
             args.insert(-1, "--headless=new")
 
         process = subprocess.Popen(args)
-        self._wait_for_cdp(port)
+        try:
+            self._wait_for_cdp(port)
+        except Exception:
+            with suppress(Exception):
+                self._terminate_chrome_process(process)
+            raise
         return process, port
 
     def _wait_for_cdp(self, port: int) -> None:
@@ -1065,7 +1718,7 @@ class PutusanCrawler:
         self, context: BrowserContext, page: Page, expected_detail_url: str
     ) -> CrawlRecord:
         actual_detail_url = page.url if _is_allowed_detail_url(page.url) else expected_detail_url
-        html = page.content()
+        html = self._safe_page_content(page)
         title = parse_title(html)
         pdf_link = parse_pdf_link(html, page.url)
         if not pdf_link:
@@ -1193,9 +1846,9 @@ class PutusanCrawler:
         printed = False
 
         while time.monotonic() < deadline:
-            html = page.content()
-            title = page.title()
-            if parse_pdf_link(html, page.url) or parse_listing(html, page.url).case_urls:
+            html = self._safe_page_content(page, max_wait_seconds=5)
+            title = self._safe_page_title(page, max_wait_seconds=2)
+            if parse_pdf_link(html, page.url) or self._parse_listing(html, page.url).case_urls:
                 return
             if not looks_like_challenge(html, title):
                 return
@@ -1217,6 +1870,49 @@ class PutusanCrawler:
             f"Cloudflare challenge did not clear within {timeout_seconds}s"
         )
 
+    def _safe_page_content(self, page: Page, max_wait_seconds: float | None = None) -> str:
+        wait_seconds = max_wait_seconds or self.config.timeout_seconds
+        deadline = time.monotonic() + wait_seconds
+        last_error: PlaywrightError | None = None
+
+        while True:
+            try:
+                return page.content()
+            except PlaywrightError as exc:
+                if not _is_transient_page_read_error(exc):
+                    raise
+                last_error = exc
+                if time.monotonic() >= deadline:
+                    raise
+                with suppress(PlaywrightError, PlaywrightTimeoutError):
+                    page.wait_for_load_state("domcontentloaded", timeout=1_000)
+                with suppress(PlaywrightError):
+                    page.wait_for_timeout(500)
+
+            if time.monotonic() >= deadline and last_error is not None:
+                raise last_error
+
+    def _safe_page_title(self, page: Page, max_wait_seconds: float = 2) -> str:
+        deadline = time.monotonic() + max_wait_seconds
+        last_error: PlaywrightError | None = None
+
+        while True:
+            try:
+                return page.title()
+            except PlaywrightError as exc:
+                if not _is_transient_page_read_error(exc):
+                    raise
+                last_error = exc
+                if time.monotonic() >= deadline:
+                    return ""
+                with suppress(PlaywrightError, PlaywrightTimeoutError):
+                    page.wait_for_load_state("domcontentloaded", timeout=500)
+                with suppress(PlaywrightError):
+                    page.wait_for_timeout(250)
+
+            if time.monotonic() >= deadline and last_error is not None:
+                return ""
+
     def _candidate_limit_reached(self, candidate_count: int) -> bool:
         return (
             self.config.max_candidates is not None
@@ -1224,11 +1920,21 @@ class PutusanCrawler:
         )
 
     def _summary(self, output_paths: list[Path], failed_downloads: int) -> CrawlSummary:
+        self.store.deduplicate_downloads()
+        output_paths = [path for path in output_paths if path.exists()]
         return CrawlSummary(
             downloaded=len(output_paths),
-            target=self.config.target_downloads,
+            target=self._summary_target(),
             failed_downloads=failed_downloads,
             output_paths=output_paths,
+        )
+
+    def _parse_listing(self, html: str, base_url: str):
+        return parse_listing(
+            html,
+            base_url,
+            case_title_prefix=self.config.case_title_prefix,
+            skip_unpublished=self.config.skip_unpublished_listing_items,
         )
 
     @staticmethod
@@ -1272,12 +1978,33 @@ def _chrome_profile_ignore(directory: str, names: list[str]) -> set[str]:
     }
 
 
+def _is_transient_page_read_error(exc: PlaywrightError) -> bool:
+    message = str(exc).lower()
+    markers = (
+        "page.content: unable to retrieve content because the page is navigating",
+        "execution context was destroyed",
+        "cannot find context with specified id",
+        "most likely because of a navigation",
+    )
+    return any(marker in message for marker in markers)
+
+
 def _is_allowed_detail_url(url: str) -> bool:
     parsed = urlparse(url)
     return (
         parsed.scheme == "https"
         and parsed.netloc.lower() == ALLOWED_HOST
         and parsed.path.startswith("/direktori/putusan/")
+        and parsed.path.lower().endswith(".html")
+    )
+
+
+def _is_allowed_listing_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc.lower() == ALLOWED_HOST
+        and parsed.path.startswith("/direktori/index/")
         and parsed.path.lower().endswith(".html")
     )
 
@@ -1295,6 +2022,11 @@ def _is_allowed_pdf_url(url: str) -> bool:
 def _ensure_allowed_detail_url(url: str) -> None:
     if not _is_allowed_detail_url(url):
         raise RuntimeError(f"refusing non-Putusan detail URL: {url}")
+
+
+def _ensure_allowed_listing_url(url: str) -> None:
+    if not _is_allowed_listing_url(url):
+        raise RuntimeError(f"refusing non-Putusan listing URL: {url}")
 
 
 def _ensure_allowed_pdf_url(url: str) -> None:
