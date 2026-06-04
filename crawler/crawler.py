@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import time
 import base64
@@ -735,7 +735,8 @@ class PutusanCrawler:
 
     def _fetch_html_with_page(self, page: Page, url: str) -> str:
         _ensure_allowed_listing_url(url)
-        result = page.evaluate(
+        result = self._safe_page_evaluate(
+            page,
             """
             async (url) => {
                 const response = await fetch(url, {
@@ -763,7 +764,8 @@ class PutusanCrawler:
     ) -> list[dict[str, object]]:
         for url in urls:
             _ensure_allowed_listing_url(url)
-        results = page.evaluate(
+        results = self._safe_page_evaluate(
+            page,
             """
             async ({urls, concurrency, timeoutMs}) => {
                 const fetchWithTimeout = async (url) => {
@@ -825,7 +827,8 @@ class PutusanCrawler:
     def _fetch_detail_pdf_batch(self, page: Page, detail_urls: list[str]) -> list[dict[str, object]]:
         for detail_url in detail_urls:
             _ensure_allowed_detail_url(detail_url)
-        return page.evaluate(
+        return self._safe_page_evaluate(
+            page,
             """
             async ({urls, concurrency, timeoutMs}) => {
                 const fetchWithTimeout = async (url, options) => {
@@ -1773,7 +1776,8 @@ class PutusanCrawler:
 
     def _save_pdf_with_page_fetch(self, page: Page, pdf_url: str, output_path: Path) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        result = page.evaluate(
+        result = self._safe_page_evaluate(
+            page,
             """
             async (url) => {
                 const response = await fetch(url, {
@@ -1869,6 +1873,37 @@ class PutusanCrawler:
         raise ChallengeBlockedError(
             f"Cloudflare challenge did not clear within {timeout_seconds}s"
         )
+
+    def _safe_page_evaluate(
+        self,
+        page: Page,
+        expression: str,
+        arg: object | None = None,
+        *,
+        max_wait_seconds: float | None = None,
+    ) -> object:
+        wait_seconds = max_wait_seconds or self.config.timeout_seconds
+        deadline = time.monotonic() + wait_seconds
+        last_error: PlaywrightError | None = None
+
+        while True:
+            try:
+                if arg is None:
+                    return page.evaluate(expression)
+                return page.evaluate(expression, arg)
+            except PlaywrightError as exc:
+                if not _is_transient_page_read_error(exc):
+                    raise
+                last_error = exc
+                if time.monotonic() >= deadline:
+                    raise
+                with suppress(PlaywrightError, PlaywrightTimeoutError):
+                    page.wait_for_load_state("domcontentloaded", timeout=1_000)
+                with suppress(PlaywrightError):
+                    page.wait_for_timeout(500)
+
+            if time.monotonic() >= deadline and last_error is not None:
+                raise last_error
 
     def _safe_page_content(self, page: Page, max_wait_seconds: float | None = None) -> str:
         wait_seconds = max_wait_seconds or self.config.timeout_seconds
@@ -2115,3 +2150,8 @@ def _http_challenge_page(html: str) -> bool:
         "needs to review the security of your connection",
     )
     return any(marker in text for marker in challenge_markers)
+
+
+
+
+
