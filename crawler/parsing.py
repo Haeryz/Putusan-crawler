@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 CASE_DETAIL_RE = re.compile(r"/direktori/putusan/[^\"'#?]+\.html(?:$|[?#])", re.I)
 DOWNLOAD_PDF_MARKERS = ("/direktori/download_file/", "/pdf/")
 ALLOWED_HOST = "putusan3.mahkamahagung.go.id"
+DOWNLOAD_FILE_RE = re.compile(r"(https?://[^\s\"'<>]+|/direktori/download_file/[^\s\"'<>]+)", re.I)
 
 
 @dataclass(frozen=True)
@@ -104,17 +105,53 @@ def parse_pdf_link(html: str, base_url: str) -> PdfLink | None:
     soup = BeautifulSoup(html, "html.parser")
 
     for anchor in soup.find_all("a", href=True):
-        href = str(anchor["href"]).strip()
-        absolute = urljoin(base_url, href)
-        parsed = urlparse(absolute)
-        if (
-            parsed.scheme == "https"
-            and parsed.netloc.lower() == ALLOWED_HOST
-            and all(marker in parsed.path for marker in DOWNLOAD_PDF_MARKERS)
-        ):
-            filename = anchor.get_text(" ", strip=True) or None
-            return PdfLink(url=absolute, filename=filename)
+        filename = anchor.get_text(" ", strip=True) or None
+        for raw_url in _pdf_url_candidates(anchor):
+            absolute = urljoin(base_url, raw_url)
+            if _is_putusan_pdf_download_url(absolute):
+                return PdfLink(url=absolute, filename=filename)
 
+    for node in soup.find_all(True):
+        for raw_url in _pdf_url_candidates(node):
+            absolute = urljoin(base_url, raw_url)
+            if _is_putusan_pdf_download_url(absolute):
+                filename = node.get_text(" ", strip=True) or None
+                if not filename:
+                    filename = _nearby_pdf_label(node)
+                return PdfLink(url=absolute, filename=filename)
+
+    return None
+
+
+def _pdf_url_candidates(node: Tag) -> list[str]:
+    values: list[str] = []
+    for attr in ("href", "data-href", "data-url", "data-download", "data-file", "onclick"):
+        value = node.get(attr)
+        if not value:
+            continue
+        text = str(value).strip()
+        if attr == "onclick":
+            values.extend(match.group(1) for match in DOWNLOAD_FILE_RE.finditer(text))
+        else:
+            values.append(text)
+    return values
+
+
+def _is_putusan_pdf_download_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc.lower() == ALLOWED_HOST
+        and all(marker in parsed.path for marker in DOWNLOAD_PDF_MARKERS)
+    )
+
+
+def _nearby_pdf_label(node: Tag) -> str | None:
+    for sibling in (node.previous_sibling, node.next_sibling):
+        if isinstance(sibling, Tag):
+            label = sibling.get_text(" ", strip=True) or None
+            if label:
+                return label
     return None
 
 

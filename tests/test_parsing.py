@@ -142,6 +142,46 @@ def test_parse_pdf_link_rejects_alternative_hosts() -> None:
     assert link is None
 
 
+def test_parse_pdf_link_from_data_href() -> None:
+    html = """
+    <button
+      data-href="/direktori/download_file/hash/pdf/case123">
+      12/Pid.Sus-Anak/2026/PN_Test.pdf
+    </button>
+    """
+
+    link = parse_pdf_link(
+        html,
+        "https://putusan3.mahkamahagung.go.id/direktori/putusan/case123.html",
+    )
+
+    assert link is not None
+    assert (
+        link.url
+        == "https://putusan3.mahkamahagung.go.id/direktori/download_file/hash/pdf/case123"
+    )
+    assert link.filename == "12/Pid.Sus-Anak/2026/PN_Test.pdf"
+
+
+def test_parse_pdf_link_from_onclick_url() -> None:
+    html = """
+    <a href="#" onclick="window.location='/direktori/download_file/hash/pdf/case456'">
+      Download PDF
+    </a>
+    """
+
+    link = parse_pdf_link(
+        html,
+        "https://putusan3.mahkamahagung.go.id/direktori/putusan/case456.html",
+    )
+
+    assert link is not None
+    assert (
+        link.url
+        == "https://putusan3.mahkamahagung.go.id/direktori/download_file/hash/pdf/case456"
+    )
+
+
 def test_looks_like_challenge_detects_cloudflare_page() -> None:
     assert looks_like_challenge("<p>Checking if the site connection is secure</p>", "Just a moment")
 

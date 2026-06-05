@@ -10,6 +10,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 from urllib.parse import urlparse
@@ -759,6 +760,65 @@ class PutusanCrawler:
         _ensure_allowed_listing_url(result["url"])
         return str(result["text"])
 
+    def _write_live_browser_view(
+        self,
+        *,
+        image_bytes: bytes,
+        page_url: str | None,
+        title: str | None,
+        label: str,
+    ) -> None:
+        live_dir = self.config.out_dir / ".hermes"
+        image_path = live_dir / "browser_view.png"
+        meta_path = live_dir / "browser_view.json"
+        try:
+            live_dir.mkdir(parents=True, exist_ok=True)
+            image_path.write_bytes(image_bytes)
+            meta_path.write_text(
+                json.dumps(
+                    {
+                        "image_path": str(image_path),
+                        "page_url": page_url,
+                        "title": title,
+                        "label": label,
+                        "captured_at": datetime.now(UTC).isoformat(),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            self.store.log(f"live-browser-view-write-error label={label} error={exc}")
+
+    def _capture_live_page_view(self, page: Page, label: str) -> None:
+        try:
+            self._write_live_browser_view(
+                image_bytes=page.screenshot(full_page=False, timeout=2_000),
+                page_url=page.url,
+                title=self._safe_page_title(page, max_wait_seconds=1),
+                label=label,
+            )
+        except Exception as exc:  # noqa: BLE001 - monitoring must not stop crawling.
+            self.store.log(
+                f"live-browser-view-page-error label={label} "
+                f"error={type(exc).__name__}: {exc}"
+            )
+
+    def _capture_live_driver_view(self, driver, label: str) -> None:
+        try:
+            self._write_live_browser_view(
+                image_bytes=driver.get_screenshot_as_png(),
+                page_url=getattr(driver, "current_url", None),
+                title=getattr(driver, "title", None),
+                label=label,
+            )
+        except Exception as exc:  # noqa: BLE001 - monitoring must not stop crawling.
+            self.store.log(
+                f"live-browser-view-driver-error label={label} "
+                f"error={type(exc).__name__}: {exc}"
+            )
+
     def _fetch_listing_pages_with_page(
         self, page: Page, urls: list[str]
     ) -> list[dict[str, object]]:
@@ -853,16 +913,37 @@ class PutusanCrawler:
                     const doc = new DOMParser().parseFromString(html, "text/html");
                     const titleNode = doc.querySelector("h1,h2,h3,.entry-title,.post-title,title");
                     const title = titleNode ? titleNode.textContent.trim() : "";
-                    const anchors = Array.from(doc.querySelectorAll("a[href]"));
-                    const pdf = anchors.find((node) => {
-                        const href = new URL(node.getAttribute("href"), baseUrl).href;
-                        return href.includes("/direktori/download_file/") && href.includes("/pdf/");
-                    });
+                    const candidates = Array.from(doc.querySelectorAll("a[href],[data-href],[data-url],[data-download],[data-file],[onclick]"));
+                    const pdf = candidates.map((node) => {
+                        const rawValues = ["href", "data-href", "data-url", "data-download", "data-file"]
+                            .map((name) => node.getAttribute(name))
+                            .filter(Boolean);
+                        const onclick = node.getAttribute("onclick") || "";
+                        const matches = onclick.matchAll(/(https?:\\/\\/[^\\s"'<>]+|\\/direktori\\/download_file\\/[^\\s"'<>]+)/gi);
+                        for (const match of matches) rawValues.push(match[1]);
+                        for (const raw of rawValues) {
+                            try {
+                                const href = new URL(raw, baseUrl).href;
+                                const parsed = new URL(href);
+                                if (
+                                    parsed.protocol === "https:" &&
+                                    parsed.hostname.toLowerCase() === "putusan3.mahkamahagung.go.id" &&
+                                    parsed.pathname.includes("/direktori/download_file/") &&
+                                    parsed.pathname.includes("/pdf/")
+                                ) {
+                                    return {node, href};
+                                }
+                            } catch (_) {
+                                continue;
+                            }
+                        }
+                        return null;
+                    }).find(Boolean);
                     if (!pdf) return {title, pdfUrl: null, filename: null};
                     return {
                         title,
-                        pdfUrl: new URL(pdf.getAttribute("href"), baseUrl).href,
-                        filename: pdf.textContent.trim() || null
+                        pdfUrl: pdf.href,
+                        filename: pdf.node.textContent.trim() || null
                     };
                 };
                 const fetchOne = async (detailUrl) => {
@@ -952,24 +1033,33 @@ class PutusanCrawler:
             )
 
         pdf_url = str(result.get("pdfUrl") or "")
-        _ensure_allowed_detail_url(detail_url)
-        _ensure_allowed_pdf_url(pdf_url)
-        fallback_stem = self._fallback_stem(detail_url)
-        filename = sanitize_filename(
-            str(result.get("filename") or "") or None,
-            fallback_stem,
-        )
-        output_path = unique_path(self.pdf_dir / filename)
-        output_path.write_bytes(base64.b64decode(str(result["base64"])))
-        verify_pdf(output_path)
-        return CrawlRecord(
-            status="downloaded",
-            detail_url=detail_url,
-            pdf_url=pdf_url,
-            output_path=str(output_path),
-            title=str(result.get("title") or "") or None,
-            filename=output_path.name,
-        )
+        try:
+            _ensure_allowed_detail_url(detail_url)
+            _ensure_allowed_pdf_url(pdf_url)
+            fallback_stem = self._fallback_stem(detail_url)
+            filename = sanitize_filename(
+                str(result.get("filename") or "") or None,
+                fallback_stem,
+            )
+            output_path = unique_path(self.pdf_dir / filename)
+            output_path.write_bytes(base64.b64decode(str(result["base64"])))
+            verify_pdf(output_path)
+            return CrawlRecord(
+                status="downloaded",
+                detail_url=detail_url,
+                pdf_url=pdf_url,
+                output_path=str(output_path),
+                title=str(result.get("title") or "") or None,
+                filename=output_path.name,
+            )
+        except Exception as exc:  # noqa: BLE001 - one bad candidate should not stop traversal.
+            return CrawlRecord(
+                status="error",
+                detail_url=detail_url,
+                pdf_url=pdf_url or None,
+                title=str(result.get("title") or "") or None,
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
     def _return_to_listing(self, page: Page, listing_url: str) -> None:
         if page.url == listing_url:
@@ -1560,18 +1650,24 @@ class PutusanCrawler:
 
     def _uc_goto_and_wait(self, driver, url: str) -> None:
         driver.get(url)
+        self._capture_live_driver_view(driver, "driver-goto")
         deadline = time.monotonic() + self.config.timeout_seconds
         passive_printed = False
         interactive_printed = False
         last_status_at = 0.0
+        last_capture_at = 0.0
 
         while time.monotonic() < deadline:
+            now = time.monotonic()
+            if now - last_capture_at >= 5:
+                self._capture_live_driver_view(driver, "driver-wait")
+                last_capture_at = now
             network_error = self._uc_network_error_visible(driver)
             if network_error:
                 raise RuntimeError(network_error)
             if not self._uc_challenge_visible(driver):
+                self._capture_live_driver_view(driver, "driver-accessible")
                 return
-            now = time.monotonic()
             if self._uc_interactive_challenge_visible(driver):
                 if not interactive_printed or now - last_status_at >= 10:
                     print(
@@ -1838,6 +1934,7 @@ class PutusanCrawler:
 
     def _goto_and_wait(self, page: Page, url: str) -> None:
         page.goto(url, wait_until="domcontentloaded", timeout=self.config.timeout_seconds * 1000)
+        self._capture_live_page_view(page, "page-goto")
         self._wait_for_accessible_page(page)
 
     def _wait_for_accessible_page(self, page: Page) -> None:
@@ -1848,13 +1945,20 @@ class PutusanCrawler:
         )
         deadline = time.monotonic() + timeout_seconds
         printed = False
+        last_capture_at = 0.0
 
         while time.monotonic() < deadline:
+            now = time.monotonic()
+            if now - last_capture_at >= 5:
+                self._capture_live_page_view(page, "page-wait")
+                last_capture_at = now
             html = self._safe_page_content(page, max_wait_seconds=5)
             title = self._safe_page_title(page, max_wait_seconds=2)
             if parse_pdf_link(html, page.url) or self._parse_listing(html, page.url).case_urls:
+                self._capture_live_page_view(page, "page-accessible")
                 return
             if not looks_like_challenge(html, title):
+                self._capture_live_page_view(page, "page-accessible")
                 return
             if not printed:
                 if self.config.browser_backend == "managed-chrome":
