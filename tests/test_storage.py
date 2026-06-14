@@ -41,6 +41,97 @@ def test_store_reads_downloaded_detail_urls(tmp_path: Path) -> None:
     assert store.downloaded_detail_urls() == {"https://example.test/case"}
 
 
+def test_store_persists_and_clears_listing_checkpoint(tmp_path: Path) -> None:
+    store = JsonlStore(tmp_path)
+    checkpoint_key = "listing|prefix=Putusan PN"
+    listing_url = "https://example.test/listing/page-7"
+
+    store.save_listing_checkpoint(checkpoint_key, listing_url)
+
+    reloaded = JsonlStore(tmp_path)
+    assert reloaded.load_listing_checkpoint(checkpoint_key) == listing_url
+    assert reloaded.load_listing_checkpoint("different") is None
+
+    reloaded.clear_listing_checkpoint(checkpoint_key)
+    assert reloaded.load_listing_checkpoint(checkpoint_key) is None
+    assert reloaded.has_listing_checkpoint_state(checkpoint_key)
+
+
+def test_store_infers_latest_matching_listing_page_from_log(tmp_path: Path) -> None:
+    store = JsonlStore(tmp_path)
+    start_url = (
+        "https://putusan3.mahkamahagung.go.id/direktori/index/"
+        "kategori/peradilan-anak-abh-1.html"
+    )
+    page_12 = start_url.removesuffix(".html") + "/page/12.html"
+    page_13 = start_url.removesuffix(".html") + "/page/13.html"
+    store.prepare()
+    store.log(f"managed-listing-clicks url={page_12} cases=20 next={page_13}")
+    store.log("managed-listing-clicks url=https://example.test/other cases=20 next=None")
+    store.log(f"managed-listing-clicks url={page_13} cases=20 next=None")
+
+    assert store.infer_listing_checkpoint_from_log(start_url) == page_13
+
+
+def test_store_resumes_interrupted_target_from_download_baseline(
+    tmp_path: Path,
+) -> None:
+    store = JsonlStore(tmp_path)
+
+    started = store.begin_or_resume_target("scope", 264, 236)
+    resumed = store.begin_or_resume_target("scope", 264, 359)
+
+    assert started.completed == 0
+    assert not started.resumed
+    assert resumed.completed == 123
+    assert resumed.baseline_downloaded == 236
+    assert resumed.resumed
+
+
+def test_completed_target_starts_fresh_next_time(tmp_path: Path) -> None:
+    store = JsonlStore(tmp_path)
+    store.begin_or_resume_target("scope", 264, 236)
+    store.complete_target("scope")
+
+    next_target = store.begin_or_resume_target("scope", 264, 500)
+
+    assert next_target.completed == 0
+    assert next_target.baseline_downloaded == 500
+    assert not next_target.resumed
+
+
+def test_processed_urls_include_semantic_duplicate_exclusions(
+    tmp_path: Path,
+) -> None:
+    store = JsonlStore(tmp_path)
+    store.prepare()
+    downloaded = "https://example.test/downloaded"
+    duplicate = "https://example.test/duplicate"
+    store.append(CrawlRecord(status="downloaded", detail_url=downloaded))
+    store.append(
+        CrawlRecord(
+            status="skipped_duplicate_content",
+            detail_url=duplicate,
+            error="same extracted text as canonical document",
+        )
+    )
+
+    assert store.excluded_detail_urls() == {duplicate}
+    assert store.processed_detail_urls() == {downloaded, duplicate}
+
+
+def test_store_reads_utf8_bom_prefixed_jsonl(tmp_path: Path) -> None:
+    store = JsonlStore(tmp_path)
+    store.prepare()
+    detail_url = "https://example.test/bom-record"
+    store.success_path.write_text(
+        CrawlRecord(status="downloaded", detail_url=detail_url).to_json() + "\n",
+        encoding="utf-8-sig",
+    )
+
+    assert store.downloaded_detail_urls() == {detail_url}
+
+
 def test_store_deduplicates_downloaded_records_by_detail_url(tmp_path: Path) -> None:
     store = JsonlStore(tmp_path)
     store.prepare()

@@ -1,7 +1,7 @@
 param(
-    [string]$StartUrl = "https://putusan3.mahkamahagung.go.id/direktori/index/kategori/peradilan-anak-abh-1.html",
+    [string]$StartUrl = "https://putusan3.mahkamahagung.go.id/direktori/index/kategori/perdagangan-orang-1.html",
     [string]$TargetDownloads = 264,
-    [string]$OutDir = "downloads/kasus anak",
+    [string]$OutDir = "downloads/TPPO",
     [int]$TimeoutSeconds = 120,
     [int]$ManualClearanceTimeoutSeconds = 120,
     [int]$MaxCandidates = 0,

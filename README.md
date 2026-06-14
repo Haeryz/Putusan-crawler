@@ -48,4 +48,18 @@ uv run sinergi crawl --target-downloads 100 --parallel-downloads 16 --no-refresh
 uv run sinergi crawl --target-downloads 100 --parallel-downloads 32 --fast-fetch-timeout-seconds 10 --no-refresh-profile-snapshot
 uv run sinergi crawl --chrome-version-main 148 --target-downloads 10
 uv run sinergi crawl --browser-backend playwright --browser-channel chrome --target-downloads 10
+uv run sinergi crawl --target-downloads 10 --restart-listing
+uv run sinergi crawl --target-downloads 10 --new-target
 ```
+
+Listing pagination is resumable. The crawler stores the interrupted listing page in
+`<out-dir>/crawl-state.json` and resumes there on the next run, while still skipping
+case URLs already recorded in `downloaded.jsonl`. Use `--restart-listing` only when
+you intentionally want to discard that pagination checkpoint and scan from the
+configured start URL.
+
+Numeric download targets are also resumable. If a target of 264 is interrupted
+after 123 verified downloads, running the same target again continues with the
+remaining 141. Once the target is completed, a later invocation starts a fresh
+target. Use `--new-target` to intentionally discard an unfinished target and
+start counting from the current verified total.

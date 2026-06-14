@@ -3,16 +3,32 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
+from urllib.parse import urlparse
 
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 from rich.table import Table
 from rich.text import Text
 
-from .crawler import DEFAULT_START_URL, CrawlConfig, CrawlInventory, PutusanCrawler
+from .crawler import (
+    DEFAULT_START_URL,
+    CrawlConfig,
+    CrawlInventory,
+    CrawlProgress,
+    PutusanCrawler,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -150,6 +166,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="reuse .browser-profile/managed-chrome instead of recopying the Chrome profile",
     )
+    crawl.add_argument(
+        "--restart-listing",
+        action="store_true",
+        help="discard saved pagination progress and begin again from --start-url",
+    )
+    crawl.add_argument(
+        "--new-target",
+        action="store_true",
+        help="start a fresh target instead of resuming an interrupted target of the same size",
+    )
     browser_mode = crawl.add_mutually_exclusive_group()
     browser_mode.add_argument(
         "--headless",
@@ -225,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
         count_parallel_pages=args.count_parallel_pages,
         case_title_prefix=args.case_title_prefix,
         skip_unpublished_listing_items=not args.include_unpublished_listing_items,
+        resume_listing=not args.restart_listing,
+        resume_target=not args.new_target,
     )
 
     rich_enabled = not args.json_summary and not args.plain
@@ -232,8 +260,8 @@ def main(argv: list[str] | None = None) -> int:
     error_console = Console(stderr=True)
 
     try:
-        crawler = PutusanCrawler(config)
         if args.count_only:
+            crawler = PutusanCrawler(config)
             inventory = _run_with_spinner(
                 console,
                 "Scanning listing pages and counting downloadable documents",
@@ -253,12 +281,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.download_all
             else f"up to {args.target_downloads} PDF(s)"
         )
-        summary = _run_with_spinner(
-            console,
-            f"Crawling and downloading {target_label}",
-            crawler.run,
-            enabled=rich_enabled,
-        )
+        if rich_enabled:
+            summary = _run_download_with_progress(console, config, target_label)
+        else:
+            summary = PutusanCrawler(config).run()
     except Exception as exc:  # noqa: BLE001 - CLI boundary should be human-readable.
         if rich_enabled:
             error_console.print(
@@ -346,6 +372,81 @@ def _run_with_spinner(console: Console, message: str, action, *, enabled: bool):
         return action()
 
 
+def _run_download_with_progress(
+    console: Console,
+    config: CrawlConfig,
+    target_label: str,
+):
+    total = None if config.download_all else config.target_downloads
+    with Progress(
+        SpinnerColumn("line"),
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(bar_width=28),
+        MofNCompleteColumn(),
+        TextColumn("[yellow]{task.fields[remaining]} left"),
+        TextColumn(
+            "[green]ok {task.fields[successful]}[/green] "
+            "[red]fail {task.fields[failed]}[/red] "
+            "[magenta]skip {task.fields[skipped]}[/magenta] "
+            "[dim]tried {task.fields[attempted]}[/dim]"
+        ),
+        TimeElapsedColumn(),
+        TextColumn("ETA"),
+        TimeRemainingColumn(),
+        console=console,
+        transient=False,
+        refresh_per_second=8,
+    ) as progress:
+        task_id = progress.add_task(
+            f"Preparing {target_label}",
+            total=total,
+            remaining="?" if total is None else str(total),
+            successful=0,
+            failed=0,
+            skipped=0,
+            attempted=0,
+        )
+
+        def update(event: CrawlProgress) -> None:
+            remaining = (
+                "?"
+                if total is None
+                else str(max(0, total - event.successful))
+            )
+            current = _progress_item_label(event.detail_url)
+            descriptions = {
+                "starting": event.message or "Preparing crawler",
+                "target_resumed": event.message or "Resuming download target",
+                "resuming": f"Resuming from {current}",
+                "downloading": f"Downloading {current}",
+                "downloaded": f"Saved {current}",
+                "failed": f"Failed {current}",
+                "skipped": f"Skipped {current}",
+                "complete": event.message or "Crawl finished",
+            }
+            progress.update(
+                task_id,
+                completed=event.successful,
+                description=descriptions.get(event.phase, event.phase.title()),
+                remaining=remaining,
+                successful=event.successful,
+                failed=event.failed,
+                skipped=event.skipped,
+                attempted=event.attempted,
+                refresh=True,
+            )
+
+        crawler = PutusanCrawler(replace(config, progress_callback=update))
+        return crawler.run()
+
+
+def _progress_item_label(detail_url: str | None) -> str:
+    if not detail_url:
+        return "candidate"
+    path = urlparse(detail_url).path.rstrip("/")
+    return path.rsplit("/", 1)[-1] or detail_url
+
+
 def _download_target_satisfied(summary) -> bool:
     return summary.target is None or summary.downloaded >= summary.target
 
@@ -427,9 +528,14 @@ def _print_download_summary_rich(console: Console, summary) -> None:
         outputs = Table(title="Downloaded PDFs", box=box.ASCII)
         outputs.add_column("#", justify="right", style="cyan", no_wrap=True)
         outputs.add_column("Path", overflow="fold")
-        for index, path in enumerate(summary.output_paths, start=1):
+        visible_paths = summary.output_paths[-20:]
+        first_index = len(summary.output_paths) - len(visible_paths) + 1
+        for index, path in enumerate(visible_paths, start=first_index):
             outputs.add_row(str(index), str(path))
         console.print(outputs)
+        omitted = len(summary.output_paths) - len(visible_paths)
+        if omitted:
+            console.print(f"[dim]{omitted} earlier downloaded path(s) omitted.[/dim]")
 
 
 def _metric(label: str, value, color: str) -> Text:

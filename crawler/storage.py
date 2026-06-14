@@ -36,12 +36,21 @@ class DeduplicationSummary:
     moved_files: int = 0
 
 
+@dataclass(frozen=True)
+class TargetProgress:
+    target: int
+    completed: int
+    baseline_downloaded: int
+    resumed: bool
+
+
 class JsonlStore:
     def __init__(self, out_dir: Path) -> None:
         self.out_dir = out_dir
         self.success_path = out_dir / "downloaded.jsonl"
         self.skipped_path = out_dir / "skipped.jsonl"
         self.log_path = out_dir / "run.log"
+        self.state_path = out_dir / "crawl-state.json"
 
     def prepare(self) -> None:
         self.out_dir.mkdir(parents=True, exist_ok=True)
@@ -61,7 +70,7 @@ class JsonlStore:
         if not self.success_path.exists():
             return urls
 
-        for line in self.success_path.read_text(encoding="utf-8").splitlines():
+        for line in self.success_path.read_text(encoding="utf-8-sig").splitlines():
             if not line.strip():
                 continue
             try:
@@ -72,11 +81,154 @@ class JsonlStore:
                 urls.add(str(record["detail_url"]))
         return urls
 
+    def excluded_detail_urls(self) -> set[str]:
+        urls: set[str] = set()
+        if not self.skipped_path.exists():
+            return urls
+        for line in self.skipped_path.read_text(encoding="utf-8-sig").splitlines():
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if (
+                record.get("status") == "skipped_duplicate_content"
+                and record.get("detail_url")
+            ):
+                urls.add(str(record["detail_url"]))
+        return urls
+
+    def processed_detail_urls(self) -> set[str]:
+        return self.downloaded_detail_urls() | self.excluded_detail_urls()
+
+    def begin_or_resume_target(
+        self,
+        target_key: str,
+        target: int,
+        current_downloaded: int,
+        *,
+        force_new: bool = False,
+    ) -> TargetProgress:
+        state = self._read_state()
+        targets = state.setdefault("download_targets", {})
+        if not isinstance(targets, dict):
+            targets = {}
+            state["download_targets"] = targets
+        active = targets.get(target_key)
+        if (
+            not force_new
+            and isinstance(active, dict)
+            and active.get("completed") is not True
+            and active.get("target") == target
+        ):
+            baseline = int(active.get("baseline_downloaded") or 0)
+            completed = min(target, max(0, current_downloaded - baseline))
+            return TargetProgress(target, completed, baseline, resumed=True)
+
+        targets[target_key] = {
+            "target": target,
+            "baseline_downloaded": current_downloaded,
+            "completed": False,
+            "started_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+        self._write_state(state)
+        return TargetProgress(target, 0, current_downloaded, resumed=False)
+
+    def complete_target(self, target_key: str) -> None:
+        state = self._read_state()
+        targets = state.get("download_targets")
+        if not isinstance(targets, dict):
+            return
+        target = targets.get(target_key)
+        if not isinstance(target, dict):
+            return
+        target["completed"] = True
+        target["completed_at"] = datetime.now(UTC).isoformat()
+        target["updated_at"] = datetime.now(UTC).isoformat()
+        self._write_state(state)
+
     def append(self, record: CrawlRecord) -> None:
         target = self.success_path if record.status == "downloaded" else self.skipped_path
         with target.open("a", encoding="utf-8") as handle:
             handle.write(record.to_json())
             handle.write("\n")
+
+    def load_listing_checkpoint(self, checkpoint_key: str) -> str | None:
+        if not self.state_path.exists():
+            return None
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+        checkpoints = state.get("listing_checkpoints")
+        if not isinstance(checkpoints, dict):
+            return None
+        checkpoint = checkpoints.get(checkpoint_key)
+        if not isinstance(checkpoint, dict):
+            return None
+        listing_url = checkpoint.get("listing_url")
+        return str(listing_url) if listing_url else None
+
+    def has_listing_checkpoint_state(self, checkpoint_key: str) -> bool:
+        if not self.state_path.exists():
+            return False
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return False
+        checkpoints = state.get("listing_checkpoints")
+        return isinstance(checkpoints, dict) and checkpoint_key in checkpoints
+
+    def infer_listing_checkpoint_from_log(self, start_url: str) -> str | None:
+        if not self.log_path.exists():
+            return None
+        category_prefix = start_url.removesuffix(".html")
+        pattern = re.compile(
+            r"(?:managed-listing-clicks|managed-listing-fast|listing|"
+            r"playwright-cdp-listing|undetected-listing) "
+            r"(?:page=\d+ )?url=(https?://\S+)"
+        )
+        inferred: str | None = None
+        try:
+            lines = self.log_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return None
+        for line in lines:
+            match = pattern.search(line)
+            if not match:
+                continue
+            listing_url = match.group(1)
+            if listing_url == start_url or listing_url.startswith(f"{category_prefix}/"):
+                inferred = listing_url
+        return inferred
+
+    def save_listing_checkpoint(self, checkpoint_key: str, listing_url: str) -> None:
+        state = self._read_state()
+        checkpoints = state.setdefault("listing_checkpoints", {})
+        if not isinstance(checkpoints, dict):
+            checkpoints = {}
+            state["listing_checkpoints"] = checkpoints
+        checkpoints[checkpoint_key] = {
+            "listing_url": listing_url,
+            "completed": False,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+        self._write_state(state)
+
+    def clear_listing_checkpoint(self, checkpoint_key: str) -> None:
+        state = self._read_state()
+        checkpoints = state.get("listing_checkpoints")
+        if not isinstance(checkpoints, dict):
+            checkpoints = {}
+            state["listing_checkpoints"] = checkpoints
+        checkpoints[checkpoint_key] = {
+            "listing_url": None,
+            "completed": True,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+        self._write_state(state)
 
     def deduplicate_downloads(self) -> DeduplicationSummary:
         if not self.success_path.exists():
@@ -91,7 +243,7 @@ class JsonlStore:
         invalid_records = 0
         moved_files = 0
 
-        for line in self.success_path.read_text(encoding="utf-8").splitlines():
+        for line in self.success_path.read_text(encoding="utf-8-sig").splitlines():
             if not line.strip():
                 continue
             try:
@@ -158,6 +310,23 @@ class JsonlStore:
         timestamp = datetime.now(UTC).isoformat()
         with self.log_path.open("a", encoding="utf-8") as handle:
             handle.write(f"{timestamp} {message}\n")
+
+    def _read_state(self) -> dict[str, object]:
+        if not self.state_path.exists():
+            return {}
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        return state if isinstance(state, dict) else {}
+
+    def _write_state(self, state: dict[str, object]) -> None:
+        temp_path = self.state_path.with_suffix(".json.tmp")
+        temp_path.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temp_path.replace(self.state_path)
 
     def _record_output_path(self, record: dict[str, object]) -> Path | None:
         raw_path = str(record.get("output_path") or "")

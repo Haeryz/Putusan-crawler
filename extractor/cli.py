@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from extractor.core import ExtractionResult, extract_pdf
+from extractor.reporting import build_corpus_report
 
 
 def _extract_one(
@@ -28,7 +29,10 @@ def _extract_one(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pdf-extractor",
-        description="Extract embedded PDF text and independently validate fidelity.",
+        description=(
+            "Extract embedded PDF text and report CER, WER, and token coverage "
+            "against an independent parser."
+        ),
     )
     parser.add_argument("input", type=Path, help="PDF file or directory of PDFs")
     parser.add_argument(
@@ -41,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--threshold",
         type=float,
         default=0.95,
-        help="minimum character similarity and token recall (default: 0.95)",
+        help="minimum content character accuracy, 1 - CER (default: 0.95)",
     )
     parser.add_argument(
         "--workers",
@@ -75,6 +79,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = output_dir / "audit.jsonl"
+    summary_path = output_dir / "metrics-summary.json"
     results: list[ExtractionResult] = []
     errors: list[dict[str, str]] = []
 
@@ -97,8 +102,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     f"[{result.status.upper():6}] {source.name} "
                     f"chars={result.raw_characters} "
-                    f"char_similarity={result.metrics.character_similarity:.3%} "
-                    f"token_recall={result.metrics.token_recall:.3%}"
+                    f"CER={result.metrics.character_error_rate:.3%} "
+                    f"WER={result.metrics.word_error_rate:.3%} "
+                    f"token_F1={result.metrics.token_f1:.3%}"
                 )
             except Exception as exc:
                 errors.append({"source": str(source.resolve()), "error": str(exc)})
@@ -109,13 +115,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             report.write(result.to_json() + "\n")
         for error in sorted(errors, key=lambda item: item["source"].casefold()):
             report.write(json.dumps(error, ensure_ascii=False, sort_keys=True) + "\n")
+    summary = build_corpus_report(
+        sorted(results, key=lambda item: item.source.casefold())
+    )
+    summary_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+        newline="\n",
+    )
 
     passed = sum(result.status == "passed" for result in results)
     review = len(results) - passed
     print(
         f"Processed {len(results)}/{len(pdfs)} PDFs: "
         f"{passed} passed, {review} review, {len(errors)} errors. "
-        f"Report: {report_path}"
+        f"Reports: {report_path}, {summary_path}"
     )
     return 1 if errors or review else 0
 

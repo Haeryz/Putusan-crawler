@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
+from typing import Callable
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
@@ -73,6 +74,9 @@ class CrawlConfig:
     count_parallel_pages: int = 16
     case_title_prefix: str | None = None
     skip_unpublished_listing_items: bool = True
+    resume_listing: bool = True
+    resume_target: bool = True
+    progress_callback: Callable[["CrawlProgress"], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -111,13 +115,47 @@ class BulkDownloadResult:
     bytes_downloaded: int = 0
 
 
+@dataclass(frozen=True)
+class CrawlProgress:
+    phase: str
+    attempted: int
+    successful: int
+    failed: int
+    skipped: int
+    detail_url: str | None = None
+    message: str | None = None
+
+
 class PutusanCrawler:
     def __init__(self, config: CrawlConfig) -> None:
         self.config = config
         self.store = JsonlStore(config.out_dir)
         self.pdf_dir = config.out_dir / "pdfs"
+        self._progress_attempted = 0
+        self._progress_successful = 0
+        self._progress_failed = 0
+        self._progress_skipped = 0
+        self._started_at: float | None = None
+        self._target_completed_before = 0
+        self._target_key: str | None = None
 
     def run(self) -> CrawlSummary:
+        self._started_at = time.perf_counter()
+        self.store.prepare()
+        self._prepare_target_progress()
+        self._report_progress(
+            "target_resumed" if self._target_completed_before else "starting",
+            message=(
+                f"Resuming target with {self._target_completed_before} already completed"
+                if self._target_completed_before
+                else "Preparing browser and crawl state"
+            ),
+        )
+        if (
+            not self.config.download_all
+            and self._target_completed_before >= self.config.target_downloads
+        ):
+            return self._summary([], 0)
         if self.config.browser_backend == "managed-chrome":
             return self._run_managed_chrome()
         if self.config.browser_backend == "undetected-chrome":
@@ -129,10 +167,140 @@ class PutusanCrawler:
         raise ValueError(f"unknown browser backend: {self.config.browser_backend}")
 
     def _target_reached(self, output_paths: list[Path]) -> bool:
-        return not self.config.download_all and len(output_paths) >= self.config.target_downloads
+        return (
+            not self.config.download_all
+            and self._target_completed_before + len(output_paths)
+            >= self.config.target_downloads
+        )
 
     def _summary_target(self) -> int | None:
         return None if self.config.download_all else self.config.target_downloads
+
+    def _target_scope_key(self) -> str:
+        return self._listing_checkpoint_key()
+
+    def _prepare_target_progress(self) -> None:
+        if self.config.download_all:
+            return
+        self._target_key = self._target_scope_key()
+        progress = self.store.begin_or_resume_target(
+            self._target_key,
+            self.config.target_downloads,
+            len(self.store.downloaded_detail_urls()),
+            force_new=not self.config.resume_target,
+        )
+        self._target_completed_before = progress.completed
+        self._progress_successful = progress.completed
+        if progress.resumed:
+            self.store.log(
+                f"target-resume target={progress.target} completed={progress.completed} "
+                f"remaining={max(0, progress.target - progress.completed)}"
+            )
+
+    def _remaining_target(self, output_paths: list[Path]) -> int:
+        if self.config.download_all:
+            return 0
+        return max(
+            0,
+            self.config.target_downloads
+            - self._target_completed_before
+            - len(output_paths),
+        )
+
+    def _complete_target_if_satisfied(self, downloaded: int) -> None:
+        if (
+            self._target_key is not None
+            and not self.config.download_all
+            and downloaded >= self.config.target_downloads
+        ):
+            self.store.complete_target(self._target_key)
+
+    def _listing_checkpoint_key(self) -> str:
+        return (
+            f"{self.config.start_url}|"
+            f"prefix={self.config.case_title_prefix or ''}|"
+            f"skip_unpublished={self.config.skip_unpublished_listing_items}"
+        )
+
+    def _initial_listing_url(self) -> str | None:
+        if not self.config.crawl_listing:
+            return None
+        checkpoint_key = self._listing_checkpoint_key()
+        if not self.config.resume_listing:
+            self.store.clear_listing_checkpoint(checkpoint_key)
+            return self.config.start_url
+        listing_url = self.store.load_listing_checkpoint(checkpoint_key)
+        if (
+            not listing_url
+            and not self.store.has_listing_checkpoint_state(checkpoint_key)
+        ):
+            listing_url = self.store.infer_listing_checkpoint_from_log(
+                self.config.start_url
+            )
+            if listing_url and _is_allowed_listing_url(listing_url):
+                self.store.save_listing_checkpoint(checkpoint_key, listing_url)
+                self.store.log(f"listing-resume-migrated url={listing_url}")
+        if listing_url and _is_allowed_listing_url(listing_url):
+            self.store.log(f"listing-resume url={listing_url}")
+            self._report_progress("resuming", detail_url=listing_url)
+            return listing_url
+        return self.config.start_url
+
+    def _checkpoint_listing_page(self, listing_url: str) -> None:
+        self.store.save_listing_checkpoint(self._listing_checkpoint_key(), listing_url)
+
+    def _advance_listing_checkpoint(self, next_url: str | None) -> None:
+        checkpoint_key = self._listing_checkpoint_key()
+        if next_url:
+            self.store.save_listing_checkpoint(checkpoint_key, next_url)
+        else:
+            self.store.clear_listing_checkpoint(checkpoint_key)
+
+    def _report_progress(
+        self,
+        phase: str,
+        *,
+        detail_url: str | None = None,
+        message: str | None = None,
+    ) -> None:
+        callback = self.config.progress_callback
+        if callback is None:
+            return
+        callback(
+            CrawlProgress(
+                phase=phase,
+                attempted=self._progress_attempted,
+                successful=self._progress_successful,
+                failed=self._progress_failed,
+                skipped=self._progress_skipped,
+                detail_url=detail_url,
+                message=message,
+            )
+        )
+
+    def _report_candidate(self, detail_url: str) -> None:
+        self._progress_attempted += 1
+        self._report_progress("downloading", detail_url=detail_url)
+
+    def _report_record(self, record: CrawlRecord) -> None:
+        if (
+            record.status == "downloaded"
+            and record.output_path
+            and Path(record.output_path).is_file()
+        ):
+            self._progress_successful += 1
+            phase = "downloaded"
+        elif record.status == "error":
+            self._progress_failed += 1
+            phase = "failed"
+        else:
+            self._progress_skipped += 1
+            phase = "skipped"
+        self._report_progress(
+            phase,
+            detail_url=record.detail_url,
+            message=record.error,
+        )
 
     def count_downloadable(self) -> CrawlInventory:
         self.store.prepare()
@@ -223,7 +391,7 @@ class PutusanCrawler:
                     f"count-fast-fallback error={type(exc).__name__}: {exc}"
                 )
 
-        downloaded_urls = self.store.downloaded_detail_urls()
+        downloaded_urls = self.store.processed_detail_urls()
         listing_url: str | None = self.config.start_url if self.config.crawl_listing else None
         seen_listing_urls: set[str] = set()
         seen_detail_urls: set[str] = set()
@@ -278,8 +446,10 @@ class PutusanCrawler:
         )
 
     def _count_with_page_fast(self, page: Page) -> CrawlInventory:
-        downloaded_urls = self.store.downloaded_detail_urls()
-        listing_url: str | None = self.config.start_url if self.config.crawl_listing else None
+        downloaded_urls = self.store.processed_detail_urls()
+        listing_url: str | None = (
+            self.config.start_url if self.config.crawl_listing else None
+        )
         if not listing_url:
             return CrawlInventory(
                 total_downloadable=0,
@@ -436,12 +606,12 @@ class PutusanCrawler:
 
     def _run_playwright(self) -> CrawlSummary:
         self.store.prepare()
-        downloaded_urls = self.store.downloaded_detail_urls()
+        downloaded_urls = self.store.processed_detail_urls()
         output_paths: list[Path] = []
         failed_downloads = 0
         visited_this_run: set[str] = set()
         candidate_count = 0
-        listing_url: str | None = self.config.start_url if self.config.crawl_listing else None
+        listing_url = self._initial_listing_url()
 
         with sync_playwright() as playwright:
             context = playwright.chromium.launch_persistent_context(
@@ -463,6 +633,7 @@ class PutusanCrawler:
                         continue
                     candidate_count += 1
                     visited_this_run.add(detail_url)
+                    self._report_candidate(detail_url)
                     result = self._download_case(context, page, detail_url)
                     if result.status == "downloaded" and result.output_path:
                         output_paths.append(Path(result.output_path))
@@ -470,8 +641,10 @@ class PutusanCrawler:
                     elif result.status == "error":
                         failed_downloads += 1
                     self.store.append(result)
+                    self._report_record(result)
 
                 while listing_url and not self._target_reached(output_paths):
+                    self._checkpoint_listing_page(listing_url)
                     self._goto_and_wait(page, listing_url)
                     listing_html = self._safe_page_content(page)
                     links = self._parse_listing(listing_html, page.url)
@@ -489,6 +662,7 @@ class PutusanCrawler:
 
                         candidate_count += 1
                         visited_this_run.add(detail_url)
+                        self._report_candidate(detail_url)
                         result = self._download_case(context, page, detail_url)
                         if result.status == "downloaded" and result.output_path:
                             output_paths.append(Path(result.output_path))
@@ -496,10 +670,13 @@ class PutusanCrawler:
                         elif result.status == "error":
                             failed_downloads += 1
                         self.store.append(result)
+                        self._report_record(result)
 
                         if self.config.delay_seconds:
                             page.wait_for_timeout(int(self.config.delay_seconds * 1000))
 
+                    if not self._target_reached(output_paths):
+                        self._advance_listing_checkpoint(links.next_url)
                     listing_url = links.next_url
 
                 return self._summary(output_paths, failed_downloads)
@@ -542,12 +719,12 @@ class PutusanCrawler:
     def _run_with_playwright_context(
         self, context: BrowserContext, page: Page
     ) -> CrawlSummary:
-        downloaded_urls = self.store.downloaded_detail_urls()
+        downloaded_urls = self.store.processed_detail_urls()
         output_paths: list[Path] = []
         failed_downloads = 0
         visited_this_run: set[str] = set()
         candidate_count = 0
-        listing_url: str | None = self.config.start_url if self.config.crawl_listing else None
+        listing_url = self._initial_listing_url()
 
         for detail_url in self.config.detail_urls:
             if self._target_reached(output_paths):
@@ -556,6 +733,7 @@ class PutusanCrawler:
                 continue
             candidate_count += 1
             visited_this_run.add(detail_url)
+            self._report_candidate(detail_url)
             result = self._download_case(context, page, detail_url)
             if result.status == "downloaded" and result.output_path:
                 output_paths.append(Path(result.output_path))
@@ -563,6 +741,7 @@ class PutusanCrawler:
             elif result.status == "error":
                 failed_downloads += 1
             self.store.append(result)
+            self._report_record(result)
 
         if listing_url and self.config.browser_backend == "managed-chrome":
             if self.config.parallel_downloads > 1:
@@ -587,6 +766,7 @@ class PutusanCrawler:
             )
 
         while listing_url and not self._target_reached(output_paths):
+            self._checkpoint_listing_page(listing_url)
             self._goto_and_wait(page, listing_url)
             listing_html = self._safe_page_content(page)
             links = self._parse_listing(listing_html, page.url)
@@ -604,6 +784,7 @@ class PutusanCrawler:
 
                 candidate_count += 1
                 visited_this_run.add(detail_url)
+                self._report_candidate(detail_url)
                 result = self._download_case(context, page, detail_url)
                 if result.status == "downloaded" and result.output_path:
                     output_paths.append(Path(result.output_path))
@@ -611,10 +792,13 @@ class PutusanCrawler:
                 elif result.status == "error":
                     failed_downloads += 1
                 self.store.append(result)
+                self._report_record(result)
 
                 if self.config.delay_seconds:
                     page.wait_for_timeout(int(self.config.delay_seconds * 1000))
 
+            if not self._target_reached(output_paths):
+                self._advance_listing_checkpoint(links.next_url)
             listing_url = links.next_url
 
         return self._summary(output_paths, failed_downloads)
@@ -631,6 +815,7 @@ class PutusanCrawler:
         failed_downloads: int,
     ) -> CrawlSummary:
         while listing_url and not self._target_reached(output_paths):
+            self._checkpoint_listing_page(listing_url)
             self._goto_and_wait(page, listing_url)
             current_listing_url = page.url
             listing_html = self._safe_page_content(page)
@@ -650,6 +835,7 @@ class PutusanCrawler:
 
                 candidate_count += 1
                 visited_this_run.add(detail_url)
+                self._report_candidate(detail_url)
                 result = self._download_case_by_click(context, page, detail_url)
                 if result.status == "downloaded" and result.output_path:
                     output_paths.append(Path(result.output_path))
@@ -657,6 +843,7 @@ class PutusanCrawler:
                 elif result.status == "error":
                     failed_downloads += 1
                 self.store.append(result)
+                self._report_record(result)
 
                 if self._target_reached(output_paths):
                     break
@@ -665,6 +852,8 @@ class PutusanCrawler:
                 if self.config.delay_seconds:
                     page.wait_for_timeout(int(self.config.delay_seconds * 1000))
 
+            if not self._target_reached(output_paths):
+                self._advance_listing_checkpoint(links.next_url)
             listing_url = links.next_url
 
         return self._summary(output_paths, failed_downloads)
@@ -682,6 +871,7 @@ class PutusanCrawler:
         next_url: str | None = listing_url
 
         while next_url and not self._target_reached(output_paths):
+            self._checkpoint_listing_page(next_url)
             if self._candidate_limit_reached(candidate_count):
                 break
 
@@ -714,10 +904,19 @@ class PutusanCrawler:
                 page_detail_urls.append(detail_url)
 
             max_workers = max(1, self.config.parallel_downloads)
-            for index in range(0, len(page_detail_urls), max_workers):
+            index = 0
+            while index < len(page_detail_urls):
                 if self._target_reached(output_paths):
                     break
-                batch = page_detail_urls[index : index + max_workers]
+                if self.config.download_all:
+                    batch_size = max_workers
+                else:
+                    remaining = self._remaining_target(output_paths)
+                    batch_size = min(max_workers, remaining)
+                batch = page_detail_urls[index : index + batch_size]
+                index += len(batch)
+                for detail_url in batch:
+                    self._report_candidate(detail_url)
                 results = self._fetch_detail_pdf_batch(page, batch)
                 for result in results:
                     record = self._record_fast_fetch_result(result)
@@ -727,9 +926,10 @@ class PutusanCrawler:
                     elif record.status == "error":
                         failed_downloads += 1
                     self.store.append(record)
-                    if self._target_reached(output_paths):
-                        break
+                    self._report_record(record)
 
+            if not self._target_reached(output_paths):
+                self._advance_listing_checkpoint(links.next_url)
             next_url = links.next_url
 
         return self._summary(output_paths, failed_downloads)
@@ -1075,12 +1275,12 @@ class PutusanCrawler:
             return self._run_parallel_undetected()
 
         self.store.prepare()
-        downloaded_urls = self.store.downloaded_detail_urls()
+        downloaded_urls = self.store.processed_detail_urls()
         output_paths: list[Path] = []
         failed_downloads = 0
         visited_this_run: set[str] = set()
         candidate_count = 0
-        listing_url: str | None = self.config.start_url if self.config.crawl_listing else None
+        listing_url = self._initial_listing_url()
 
         driver = self._launch_undetected_chrome()
         should_close_driver = True
@@ -1092,6 +1292,7 @@ class PutusanCrawler:
                     continue
                 candidate_count += 1
                 visited_this_run.add(detail_url)
+                self._report_candidate(detail_url)
                 result = self._download_case_undetected(driver, detail_url)
                 if result.status == "downloaded" and result.output_path:
                     output_paths.append(Path(result.output_path))
@@ -1099,8 +1300,10 @@ class PutusanCrawler:
                 elif result.status == "error":
                     failed_downloads += 1
                 self.store.append(result)
+                self._report_record(result)
 
             while listing_url and not self._target_reached(output_paths):
+                self._checkpoint_listing_page(listing_url)
                 self._uc_goto_and_wait(driver, listing_url)
                 listing_html = driver.page_source
                 links = self._parse_listing(listing_html, driver.current_url)
@@ -1119,6 +1322,7 @@ class PutusanCrawler:
 
                     candidate_count += 1
                     visited_this_run.add(detail_url)
+                    self._report_candidate(detail_url)
                     result = self._download_case_undetected(driver, detail_url)
                     if result.status == "downloaded" and result.output_path:
                         output_paths.append(Path(result.output_path))
@@ -1126,10 +1330,13 @@ class PutusanCrawler:
                     elif result.status == "error":
                         failed_downloads += 1
                     self.store.append(result)
+                    self._report_record(result)
 
                     if self.config.delay_seconds:
                         time.sleep(self.config.delay_seconds)
 
+                if not self._target_reached(output_paths):
+                    self._advance_listing_checkpoint(links.next_url)
                 listing_url = links.next_url
 
             return self._summary(output_paths, failed_downloads)
@@ -1147,7 +1354,7 @@ class PutusanCrawler:
     def _run_parallel_undetected(self) -> CrawlSummary:
         started_at = time.perf_counter()
         self.store.prepare()
-        downloaded_urls = self.store.downloaded_detail_urls()
+        downloaded_urls = self.store.processed_detail_urls()
         detail_urls = list(self.config.detail_urls)
         explicit_count = len(detail_urls)
 
@@ -1161,8 +1368,8 @@ class PutusanCrawler:
                     self.config.start_url,
                     (
                         None
-                        if self.config.download_all
-                        else self.config.target_downloads + len(downloaded_urls)
+                        if self.config.max_candidates is None
+                        else self.config.max_candidates + len(downloaded_urls)
                     ),
                 )
                 detail_urls.extend(collected_urls)
@@ -1188,7 +1395,10 @@ class PutusanCrawler:
                 continue
             seen.add(detail_url)
             queue.append(detail_url)
-            if self._target_reached(queue):
+            if (
+                self.config.max_candidates is not None
+                and len(queue) >= self.config.max_candidates
+            ):
                 break
 
         output_paths: list[Path] = []
@@ -1198,33 +1408,67 @@ class PutusanCrawler:
         max_workers = max(1, self.config.parallel_downloads)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(self._download_case_parallel, session_state, detail_url, path_lock)
-                for detail_url in queue
-            ]
-            for future in as_completed(futures):
-                result = future.result()
-                self.store.append(result.record)
-                if result.record.status == "downloaded" and result.record.output_path:
-                    output_paths.append(Path(result.record.output_path))
-                    total_bytes += result.bytes_downloaded
+            queue_index = 0
+            while queue_index < len(queue) and not self._target_reached(output_paths):
+                if self.config.download_all:
+                    batch_size = max_workers
                 else:
-                    failed_downloads += 1
+                    remaining = self._remaining_target(output_paths)
+                    batch_size = min(max_workers, remaining)
+                batch = queue[queue_index : queue_index + batch_size]
+                queue_index += len(batch)
+                futures = []
+                for detail_url in batch:
+                    self._report_candidate(detail_url)
+                    futures.append(
+                        executor.submit(
+                            self._download_case_parallel,
+                            session_state,
+                            detail_url,
+                            path_lock,
+                        )
+                    )
+                for future in as_completed(futures):
+                    result = future.result()
+                    self.store.append(result.record)
+                    self._report_record(result.record)
+                    if result.record.status == "downloaded" and result.record.output_path:
+                        output_paths.append(Path(result.record.output_path))
+                        total_bytes += result.bytes_downloaded
+                        downloaded_urls.add(result.record.detail_url)
+                    elif result.record.status == "error":
+                        failed_downloads += 1
 
         elapsed = time.perf_counter() - started_at
-        return CrawlSummary(
-            downloaded=len(output_paths),
+        total_downloaded = self._target_completed_before + len(output_paths)
+        summary = CrawlSummary(
+            downloaded=total_downloaded,
             target=self._summary_target(),
             failed_downloads=failed_downloads,
             output_paths=output_paths,
             elapsed_seconds=elapsed,
             metrics={
-                "queued": len(queue),
+                "candidates_available": len(queue),
+                "attempted": self._progress_attempted,
+                "skipped": self._progress_skipped,
+                "resumed_downloads": self._target_completed_before,
+                "downloaded_this_run": len(output_paths),
                 "parallel_downloads": max_workers,
                 "bytes_downloaded": total_bytes,
                 "downloads_per_second": len(output_paths) / elapsed if elapsed else 0,
+                "success_rate_percent": (
+                    round(
+                        100 * len(output_paths) / self._progress_attempted,
+                        1,
+                    )
+                    if self._progress_attempted
+                    else 0
+                ),
             },
         )
+        self._complete_target_if_satisfied(total_downloaded)
+        self._report_progress("complete", message="Crawl finished")
+        return summary
 
     def _collect_listing_detail_urls(
         self, driver, start_url: str, target_count: int | None
@@ -1933,9 +2177,38 @@ class PutusanCrawler:
             downloaded_path.replace(output_path)
 
     def _goto_and_wait(self, page: Page, url: str) -> None:
-        page.goto(url, wait_until="domcontentloaded", timeout=self.config.timeout_seconds * 1000)
-        self._capture_live_page_view(page, "page-goto")
-        self._wait_for_accessible_page(page)
+        last_error: PlaywrightError | None = None
+        for attempt in range(1, self.config.retry_attempts + 1):
+            try:
+                page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=self.config.timeout_seconds * 1000,
+                )
+                if str(page.url).startswith("chrome-error://"):
+                    raise PlaywrightError(
+                        f"Chrome opened an internal error page while navigating to {url}"
+                    )
+                self._capture_live_page_view(page, "page-goto")
+                self._wait_for_accessible_page(page)
+                return
+            except (PlaywrightError, PlaywrightTimeoutError) as exc:
+                if not _is_retryable_navigation_error(exc, str(page.url)):
+                    raise
+                last_error = exc
+                self.store.log(
+                    f"navigation-retry attempt={attempt} url={url} "
+                    f"page_url={page.url} error={type(exc).__name__}: {exc}"
+                )
+                if attempt >= self.config.retry_attempts:
+                    break
+                with suppress(PlaywrightError, PlaywrightTimeoutError):
+                    page.goto("about:blank", wait_until="commit", timeout=5_000)
+                with suppress(PlaywrightError):
+                    page.wait_for_timeout(min(1_000 * attempt, 3_000))
+
+        assert last_error is not None
+        raise last_error
 
     def _wait_for_accessible_page(self, page: Page) -> None:
         timeout_seconds = (
@@ -2061,12 +2334,36 @@ class PutusanCrawler:
     def _summary(self, output_paths: list[Path], failed_downloads: int) -> CrawlSummary:
         self.store.deduplicate_downloads()
         output_paths = [path for path in output_paths if path.exists()]
-        return CrawlSummary(
-            downloaded=len(output_paths),
+        elapsed = (
+            time.perf_counter() - self._started_at
+            if self._started_at is not None
+            else None
+        )
+        total_downloaded = self._target_completed_before + len(output_paths)
+        summary = CrawlSummary(
+            downloaded=total_downloaded,
             target=self._summary_target(),
             failed_downloads=failed_downloads,
             output_paths=output_paths,
+            elapsed_seconds=elapsed,
+            metrics={
+                "attempted": self._progress_attempted,
+                "skipped": self._progress_skipped,
+                "resumed_downloads": self._target_completed_before,
+                "downloaded_this_run": len(output_paths),
+                "success_rate_percent": (
+                    round(
+                        100 * len(output_paths) / self._progress_attempted,
+                        1,
+                    )
+                    if self._progress_attempted
+                    else 0
+                ),
+            },
         )
+        self._complete_target_if_satisfied(total_downloaded)
+        self._report_progress("complete", message="Crawl finished")
+        return summary
 
     def _parse_listing(self, html: str, base_url: str):
         return parse_listing(
@@ -2124,6 +2421,20 @@ def _is_transient_page_read_error(exc: PlaywrightError) -> bool:
         "execution context was destroyed",
         "cannot find context with specified id",
         "most likely because of a navigation",
+    )
+    return any(marker in message for marker in markers)
+
+
+def _is_retryable_navigation_error(exc: PlaywrightError, page_url: str) -> bool:
+    if page_url.startswith("chrome-error://"):
+        return True
+    message = str(exc).lower()
+    markers = (
+        "interrupted by another navigation",
+        "chrome-error://chromewebdata/",
+        "net::err_",
+        "navigation timeout",
+        "page.goto: timeout",
     )
     return any(marker in message for marker in markers)
 

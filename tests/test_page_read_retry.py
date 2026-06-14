@@ -145,3 +145,88 @@ def test_safe_page_evaluate_retries_transient_navigation_error(tmp_path: Path) -
     assert page.evaluate_calls == 2
     assert page.load_state_waits == 1
     assert page.timeout_waits == 1
+
+
+class InterruptedNavigationPage:
+    def __init__(self, failures: int = 1) -> None:
+        self.failures = failures
+        self.goto_calls: list[str] = []
+        self.url = "about:blank"
+        self.timeout_waits = 0
+
+    def goto(self, url: str, wait_until: str, timeout: int) -> None:
+        assert timeout > 0
+        self.goto_calls.append(url)
+        if url == "about:blank":
+            self.url = url
+            return
+        if self.failures:
+            self.failures -= 1
+            self.url = "chrome-error://chromewebdata/"
+            raise PlaywrightError(
+                f'Page.goto: Navigation to "{url}" is interrupted by another '
+                'navigation to "chrome-error://chromewebdata/"'
+            )
+        self.url = url
+
+    def content(self) -> str:
+        return "<html><body>listing loaded</body></html>"
+
+    def title(self) -> str:
+        return "Putusan listing"
+
+    def wait_for_timeout(self, timeout: int) -> None:
+        assert timeout > 0
+        self.timeout_waits += 1
+
+
+def test_goto_retries_after_chrome_error_interrupted_navigation(
+    tmp_path: Path,
+) -> None:
+    page = InterruptedNavigationPage()
+    crawler = PutusanCrawler(
+        CrawlConfig(
+            out_dir=tmp_path,
+            timeout_seconds=1,
+            manual_clearance_timeout_seconds=1,
+            retry_attempts=3,
+        )
+    )
+    target = (
+        "https://putusan3.mahkamahagung.go.id/direktori/index/"
+        "kategori/peradilan-anak-abh-1/page/27.html"
+    )
+
+    crawler._goto_and_wait(page, target)
+
+    assert page.goto_calls == [target, "about:blank", target]
+    assert page.url == target
+    assert page.timeout_waits == 1
+    assert "navigation-retry attempt=1" in (tmp_path / "run.log").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_goto_stops_after_navigation_retry_limit(tmp_path: Path) -> None:
+    page = InterruptedNavigationPage(failures=5)
+    crawler = PutusanCrawler(
+        CrawlConfig(
+            out_dir=tmp_path,
+            timeout_seconds=1,
+            manual_clearance_timeout_seconds=1,
+            retry_attempts=2,
+        )
+    )
+    target = (
+        "https://putusan3.mahkamahagung.go.id/direktori/index/"
+        "kategori/peradilan-anak-abh-1/page/27.html"
+    )
+
+    try:
+        crawler._goto_and_wait(page, target)
+    except PlaywrightError as exc:
+        assert "interrupted by another navigation" in str(exc)
+    else:
+        raise AssertionError("expected navigation failure")
+
+    assert page.goto_calls == [target, "about:blank", target]
