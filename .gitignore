@@ -8,7 +8,23 @@ wheels/
 
 # Virtual environments
 .venv
+hermes-agent/
+
+# Local credentials
+.env
+**/.env
 
 # Crawler runtime state
 .browser-profile/
 downloads/
+
+# LLM aggregation runtime state
+LLM-aggregator/Anak/Deepseek/pause
+LLM-aggregator/**/progress.jsonl
+LLM-aggregator/**/logs/
+LLM-aggregator/**/output/
+
+# Generated artifacts and dependency installs
+outputs/
+node_modules/
+**/node_modules/

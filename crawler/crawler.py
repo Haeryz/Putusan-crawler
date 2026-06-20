@@ -45,6 +45,14 @@ class ChallengeBlockedError(RuntimeError):
     """Raised when a challenge page does not clear through normal browser execution."""
 
 
+class RateLimitedError(RuntimeError):
+    """Raised when Putusan MA asks the crawler to reduce its request rate."""
+
+    def __init__(self, message: str, retry_after_seconds: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
 @dataclass(frozen=True)
 class CrawlConfig:
     start_url: str = DEFAULT_START_URL
@@ -57,6 +65,8 @@ class CrawlConfig:
     max_candidates: int | None = None
     retry_attempts: int = 3
     delay_seconds: float = 0.0
+    rate_limit_backoff_seconds: float = 30.0
+    challenge_cooldown_seconds: float = 0.0
     browser_channel: str | None = None
     browser_backend: str = "managed-chrome"
     chrome_version_main: int | None = None
@@ -2019,6 +2029,7 @@ class PutusanCrawler:
         self, context: BrowserContext, page: Page, detail_url: str
     ) -> CrawlRecord:
         last_error: Exception | None = None
+        listing_url = page.url
         _ensure_allowed_detail_url(detail_url)
         for attempt in range(1, self.config.retry_attempts + 1):
             try:
@@ -2030,7 +2041,9 @@ class PutusanCrawler:
                     f"click-attempt={attempt} detail_url={detail_url} "
                     f"error={type(exc).__name__}: {exc}"
                 )
-                time.sleep(min(2 * attempt, 10))
+                if attempt < self.config.retry_attempts:
+                    self._return_to_listing(page, listing_url)
+                    time.sleep(self._retry_delay_seconds(exc, attempt))
 
         return CrawlRecord(
             status="error",
@@ -2139,6 +2152,7 @@ class PutusanCrawler:
                     status: response.status,
                     url: response.url,
                     contentType: response.headers.get("content-type") || "",
+                    retryAfter: response.headers.get("retry-after") || "",
                     base64: btoa(binary)
                 };
             }
@@ -2146,10 +2160,23 @@ class PutusanCrawler:
             pdf_url,
         )
         if not result["ok"]:
+            if result["status"] == 429:
+                retry_after = _parse_retry_after_seconds(result.get("retryAfter"))
+                raise RateLimitedError(
+                    "PDF fetch failed with HTTP 429",
+                    retry_after_seconds=retry_after,
+                )
             raise RuntimeError(f"PDF fetch failed with HTTP {result['status']}")
         _ensure_allowed_pdf_url(result["url"])
         body = base64.b64decode(result["base64"])
         output_path.write_bytes(body)
+
+    def _retry_delay_seconds(self, error: Exception, attempt: int) -> float:
+        if isinstance(error, RateLimitedError):
+            server_delay = error.retry_after_seconds or 0.0
+            configured_delay = self.config.rate_limit_backoff_seconds * attempt
+            return max(server_delay, configured_delay)
+        return min(2 * attempt, 10)
 
     def _save_pdf_with_chrome_click(self, page: Page, pdf_url: str, output_path: Path) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2218,6 +2245,7 @@ class PutusanCrawler:
         )
         deadline = time.monotonic() + timeout_seconds
         printed = False
+        challenge_seen = False
         last_capture_at = 0.0
 
         while time.monotonic() < deadline:
@@ -2225,14 +2253,27 @@ class PutusanCrawler:
             if now - last_capture_at >= 5:
                 self._capture_live_page_view(page, "page-wait")
                 last_capture_at = now
-            html = self._safe_page_content(page, max_wait_seconds=5)
-            title = self._safe_page_title(page, max_wait_seconds=2)
+            try:
+                html = self._safe_page_content(page, max_wait_seconds=5)
+                title = self._safe_page_title(page, max_wait_seconds=2)
+            except (PlaywrightError, PlaywrightTimeoutError) as exc:
+                if not _is_transient_page_read_error(exc):
+                    raise
+                self.store.log(
+                    "challenge-navigation-wait "
+                    f"url={page.url} error={type(exc).__name__}: {exc}"
+                )
+                page.wait_for_timeout(1_000)
+                continue
             if parse_pdf_link(html, page.url) or self._parse_listing(html, page.url).case_urls:
                 self._capture_live_page_view(page, "page-accessible")
+                self._cool_down_after_challenge(page, challenge_seen)
                 return
             if not looks_like_challenge(html, title):
                 self._capture_live_page_view(page, "page-accessible")
+                self._cool_down_after_challenge(page, challenge_seen)
                 return
+            challenge_seen = True
             if not printed:
                 if self.config.browser_backend == "managed-chrome":
                     print(
@@ -2250,6 +2291,16 @@ class PutusanCrawler:
         raise ChallengeBlockedError(
             f"Cloudflare challenge did not clear within {timeout_seconds}s"
         )
+
+    def _cool_down_after_challenge(self, page: Page, challenge_seen: bool) -> None:
+        if not challenge_seen or self.config.challenge_cooldown_seconds <= 0:
+            return
+        cooldown_ms = int(self.config.challenge_cooldown_seconds * 1000)
+        self.store.log(
+            f"challenge-cleared cooldown_seconds={self.config.challenge_cooldown_seconds:g} "
+            f"url={page.url}"
+        )
+        page.wait_for_timeout(cooldown_ms)
 
     def _safe_page_evaluate(
         self,
@@ -2565,6 +2616,14 @@ def _http_challenge_page(html: str) -> bool:
         "needs to review the security of your connection",
     )
     return any(marker in text for marker in challenge_markers)
+
+
+def _parse_retry_after_seconds(value: object) -> float | None:
+    try:
+        seconds = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, seconds)
 
 
 

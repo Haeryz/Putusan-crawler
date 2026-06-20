@@ -96,6 +96,18 @@ def build_parser() -> argparse.ArgumentParser:
     crawl.add_argument("--retry-attempts", type=int, default=3)
     crawl.add_argument("--delay-seconds", type=float, default=0.0)
     crawl.add_argument(
+        "--rate-limit-backoff-seconds",
+        type=float,
+        default=30.0,
+        help="base wait after HTTP 429; multiplied by the retry attempt",
+    )
+    crawl.add_argument(
+        "--challenge-cooldown-seconds",
+        type=float,
+        default=0.0,
+        help="wait after a Cloudflare challenge clears before resuming navigation",
+    )
+    crawl.add_argument(
         "--parallel-downloads",
         type=int,
         default=1,
@@ -206,6 +218,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--timeout-seconds must be greater than 0")
     if args.retry_attempts <= 0:
         parser.error("--retry-attempts must be greater than 0")
+    if args.delay_seconds < 0:
+        parser.error("--delay-seconds must be zero or greater")
+    if args.rate_limit_backoff_seconds < 0:
+        parser.error("--rate-limit-backoff-seconds must be zero or greater")
+    if args.challenge_cooldown_seconds < 0:
+        parser.error("--challenge-cooldown-seconds must be zero or greater")
     if args.parallel_downloads <= 0:
         parser.error("--parallel-downloads must be greater than 0")
     if args.debug_hold_seconds < 0:
@@ -234,6 +252,8 @@ def main(argv: list[str] | None = None) -> int:
         max_candidates=args.max_candidates,
         retry_attempts=args.retry_attempts,
         delay_seconds=args.delay_seconds,
+        rate_limit_backoff_seconds=args.rate_limit_backoff_seconds,
+        challenge_cooldown_seconds=args.challenge_cooldown_seconds,
         browser_channel=args.browser_channel,
         browser_backend=args.browser_backend,
         chrome_version_main=args.chrome_version_main,

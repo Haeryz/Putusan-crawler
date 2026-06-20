@@ -3,7 +3,9 @@ from pathlib import Path
 
 from playwright.sync_api import Error as PlaywrightError
 
-from crawler.crawler import CrawlConfig, PutusanCrawler
+import crawler.crawler as crawler_module
+from crawler.crawler import CrawlConfig, PutusanCrawler, RateLimitedError
+from crawler.storage import CrawlRecord
 
 
 class FlakyContentPage:
@@ -55,6 +57,50 @@ def test_wait_for_accessible_page_retries_transient_content_read(tmp_path: Path)
     assert page.content_calls == 2
     assert page.load_state_waits == 1
     assert page.timeout_waits == 1
+
+
+class ClearingChallengePage:
+    url = "https://putusan3.mahkamahagung.go.id/direktori/putusan/case.html"
+
+    def __init__(self) -> None:
+        self.content_calls = 0
+        self.waits: list[int] = []
+
+    def content(self) -> str:
+        self.content_calls += 1
+        if self.content_calls == 1:
+            return "<html><title>Just a moment</title><p>Verify you are human</p></html>"
+        return """
+        <a href="/direktori/download_file/hash/pdf/case">case.pdf</a>
+        """
+
+    def title(self) -> str:
+        return "Just a moment" if self.content_calls == 1 else "Putusan PN Test"
+
+    def wait_for_timeout(self, timeout: int) -> None:
+        self.waits.append(timeout)
+
+
+def test_wait_for_accessible_page_cools_down_after_challenge_clears(
+    tmp_path: Path, monkeypatch
+) -> None:
+    page = ClearingChallengePage()
+    crawler = PutusanCrawler(
+        CrawlConfig(
+            out_dir=tmp_path,
+            timeout_seconds=1,
+            manual_clearance_timeout_seconds=1,
+            challenge_cooldown_seconds=30,
+        )
+    )
+    monkeypatch.setattr(crawler, "_capture_live_page_view", lambda *args: None)
+
+    crawler._wait_for_accessible_page(page)
+
+    assert page.waits == [2_000, 30_000]
+    assert "challenge-cleared cooldown_seconds=30" in (
+        tmp_path / "run.log"
+    ).read_text(encoding="utf-8")
 
 
 class ScreenshotPage:
@@ -230,3 +276,86 @@ def test_goto_stops_after_navigation_retry_limit(tmp_path: Path) -> None:
         raise AssertionError("expected navigation failure")
 
     assert page.goto_calls == [target, "about:blank", target]
+
+
+class RateLimitedPdfPage:
+    def evaluate(self, expression: str, arg=None):
+        return {
+            "ok": False,
+            "status": 429,
+            "url": arg,
+            "contentType": "text/html",
+            "retryAfter": "45",
+            "base64": "",
+        }
+
+
+def test_pdf_fetch_429_preserves_retry_after(tmp_path: Path) -> None:
+    crawler = PutusanCrawler(CrawlConfig(out_dir=tmp_path))
+    pdf_url = (
+        "https://putusan3.mahkamahagung.go.id/direktori/"
+        "download_file/hash/pdf/case"
+    )
+
+    try:
+        crawler._save_pdf_with_page_fetch(
+            RateLimitedPdfPage(),
+            pdf_url,
+            tmp_path / "case.pdf",
+        )
+    except RateLimitedError as exc:
+        assert exc.retry_after_seconds == 45
+    else:
+        raise AssertionError("expected HTTP 429 to raise RateLimitedError")
+
+
+class ListingPage:
+    url = (
+        "https://putusan3.mahkamahagung.go.id/direktori/index/"
+        "kategori/perdagangan-orang-1.html"
+    )
+
+
+def test_click_retry_returns_to_listing_and_backs_off_after_429(
+    tmp_path: Path, monkeypatch
+) -> None:
+    crawler = PutusanCrawler(
+        CrawlConfig(
+            out_dir=tmp_path,
+            retry_attempts=2,
+            rate_limit_backoff_seconds=60,
+        )
+    )
+    detail_url = (
+        "https://putusan3.mahkamahagung.go.id/direktori/putusan/case.html"
+    )
+    click_calls: list[str] = []
+    returned_to: list[str] = []
+    sleeps: list[float] = []
+    attempts = 0
+
+    def click(page, url: str) -> None:
+        click_calls.append(url)
+
+    def download(context, page, url: str) -> CrawlRecord:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RateLimitedError("PDF fetch failed with HTTP 429", 45)
+        return CrawlRecord(status="downloaded", detail_url=url)
+
+    monkeypatch.setattr(crawler, "_click_detail_link", click)
+    monkeypatch.setattr(crawler, "_download_current_detail", download)
+    monkeypatch.setattr(
+        crawler,
+        "_return_to_listing",
+        lambda page, url: returned_to.append(url),
+    )
+    monkeypatch.setattr(crawler_module.time, "sleep", sleeps.append)
+
+    record = crawler._download_case_by_click(None, ListingPage(), detail_url)
+
+    assert record.status == "downloaded"
+    assert click_calls == [detail_url, detail_url]
+    assert returned_to == [ListingPage.url]
+    assert sleeps == [60]

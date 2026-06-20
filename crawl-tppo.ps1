@@ -1,9 +1,13 @@
 param(
     [string]$StartUrl = "https://putusan3.mahkamahagung.go.id/direktori/index/kategori/perdagangan-orang-1.html",
-    [string]$TargetDownloads = 264,
+    [string]$TargetDownloads = 500,
     [string]$OutDir = "downloads/TPPO",
     [int]$TimeoutSeconds = 120,
-    [int]$ManualClearanceTimeoutSeconds = 120,
+    [int]$ManualClearanceTimeoutSeconds = 300,
+    [double]$DelaySeconds = 8,
+    [double]$ChallengeCooldownSeconds = 30,
+    [double]$RateLimitBackoffSeconds = 60,
+    [int]$RetryAttempts = 5,
     [int]$MaxCandidates = 0,
     [switch]$RestartListing,
     [switch]$NewTarget
@@ -22,6 +26,10 @@ $CrawlArgs = @(
     "--out-dir", $OutDir,
     "--timeout-seconds", "$TimeoutSeconds",
     "--manual-clearance-timeout-seconds", "$ManualClearanceTimeoutSeconds",
+    "--delay-seconds", "$DelaySeconds",
+    "--challenge-cooldown-seconds", "$ChallengeCooldownSeconds",
+    "--rate-limit-backoff-seconds", "$RateLimitBackoffSeconds",
+    "--retry-attempts", "$RetryAttempts",
     "--case-title-prefix", $CaseTitlePrefix,
     "--no-refresh-profile-snapshot"
 )
