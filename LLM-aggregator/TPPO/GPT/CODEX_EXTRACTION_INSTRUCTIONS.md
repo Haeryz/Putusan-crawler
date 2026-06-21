@@ -4,9 +4,15 @@ Use this file as the full task instruction.
 
 ## Objective
 
-Manually extract Indonesian court decision sections into:
+Manually extract Indonesian court decision sections into individual JSON artifacts. Each processed raw-text source must produce exactly one JSON file under:
 
-`LLM-aggregator/TPPO/GPT/TPPO_31_sections_500_rows.xlsx`
+`LLM-aggregator/TPPO/GPT/output/<source-stem>.json`
+
+Each output file must conform to:
+
+`LLM-aggregator/TPPO/GPT/TPPO.json`
+
+`TPPO.json` is the JSON Schema only. Do not append all 500 extractions into `TPPO.json`, and do not create one single big JSON file as the primary extraction output.
 
 Follow the section schema in:
 
@@ -22,9 +28,60 @@ Source documents are already extracted as raw text in:
 
 Do not waste time extracting from PDFs unless the raw text is missing or unreadable.
 
-## Scope Per Run
+## One-Click Launcher
 
-Process the next unprocessed raw-text files one by one. If the user does not specify a count, process 5 documents.
+Start or resume the automated Codex extraction loop with:
+
+```powershell
+.\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1
+```
+
+For Explorer/double-click usage, run:
+
+```cmd
+LLM-aggregator\TPPO\GPT\run-codex-extraction.cmd
+```
+
+The launcher calls `codex exec` non-interactively, gives Codex this extraction loop, and writes outputs/checkpoints in the GPT directory. It resumes from existing `progress.jsonl` records and `GPT/output/*.json` files, so rerunning the launcher should continue pending files rather than starting over.
+
+Useful controls:
+
+```powershell
+.\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1 -Action Status
+.\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1 -Target 1
+.\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1 -Target 10
+.\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1 -Model gpt-5-codex
+```
+
+`-Target X` means launch X new Codex sessions. Each Codex session processes exactly one pending source file, writes/checkpoints it, then exits. `-MaxFiles` is accepted as a backward-compatible alias for `-Target`; it does not mean multiple files inside one Codex session.
+
+When `Target` is greater than 1 and less than 10, the launcher starts those Codex sessions in parallel. For example, `-Target 4` starts four Codex sessions at once, each preassigned to a different pending source file. `-Target 10` or higher runs sequentially to avoid overloading the machine/API.
+
+## Agent Loop
+
+This workflow follows the current "agent loop" pattern: use a repeatable control loop that keeps selecting, extracting, verifying, checkpointing, and checking stop conditions without requiring a new prompt for each document.
+
+Process exactly one raw-text source per Codex session. Do not process multiple source files inside a single Codex session.
+
+Loop steps:
+
+1. Discover pending files by comparing `downloads/TPPO/raw-text/*.txt` against completed records in `LLM-aggregator/TPPO/GPT/progress.jsonl` and existing JSON files in `LLM-aggregator/TPPO/GPT/output/`.
+2. Preassign one distinct source file to each target Codex session in deterministic filename order.
+3. Each Codex session reads only its assigned source file.
+4. Extract all 31 fields into one JSON object using exact contiguous source excerpts.
+5. Save the result as `LLM-aggregator/TPPO/GPT/output/<source-stem>.json`.
+6. Verify the output against `LLM-aggregator/TPPO/GPT/TPPO.json`, including all 31 section keys and accurate `empty_sections`.
+7. Append one completed JSONL checkpoint record to `LLM-aggregator/TPPO/GPT/progress.jsonl`.
+8. Check current Codex/session usage before starting the next file.
+9. Continue with the next pending file only if the usage guard has not triggered.
+
+Usage guard:
+
+- If remaining usage is below 10% of the active five-hour reset window, stop before starting another source.
+- Do not begin a large source when usage is already under the 10% threshold.
+- Create a Markdown run report under `LLM-aggregator/TPPO/GPT/reports/` before the final response.
+- Name the report with a timestamp, for example `20260620-181500-usage-stop.md`.
+- The report must include: stop reason, usage remaining, reset timing if visible, processed count in this run, completed output paths, last source handled, pending count, failed or skipped sources, and recommended resume command or next action.
 
 Use this checkpoint to know what has already been completed:
 
@@ -34,12 +91,11 @@ Append one JSONL record per completed document with:
 
 - `source_file`
 - `source_path`
-- `workbook`
-- `sheet`
-- `row`
+- `source_sha256`
+- `output`
 - `status`
 - `method`
-- `sections_filled`
+- `empty_sections`
 
 ## Manual Extraction Rule
 
@@ -48,9 +104,9 @@ This is Codex doing the extraction, not a generated extractor.
 Allowed:
 
 - Read/search raw text files to locate relevant passages.
-- Use tools only to inspect text, edit the `.xlsx`, and update the checkpoint.
+- Use tools only to inspect text, create/edit JSON output artifacts, and update the checkpoint.
 - EXTRACT THE TEXT AS IT IS IN THE TEXT U CANNOT AND NOT ALLOWED TO DO ANY SUMMARIZATION
-- Since u r limited by output tokens, therefore u have to store the text temporarely then insert it into the spreadsheet.
+- Since u r limited by output tokens, store long copied excerpts directly in the JSON artifact instead of trying to display them in chat.
 
 Not allowed:
 
@@ -58,12 +114,12 @@ Not allowed:
 - Do not hardcode a general extractor.
 - Do not use another LLM or external service to do the extraction.
 - DO NOT SUMMARIZE THE TEXT
-- DO NOT WRITE UR REASONING INSIDE COLUMN
-- DO NOT WRITE ANYTHING ELSE BESIDE ACTUAL EXTRACTION INTO COLUMNS
+- DO NOT WRITE UR REASONING INSIDE SECTION VALUES
+- DO NOT WRITE ANYTHING ELSE BESIDE ACTUAL EXTRACTION INTO SECTION VALUES
 
 ## TPPO Format Context
 
-The PDF format file is not a source decision to extract into the workbook. It is a guide for how TPPO decisions are usually ordered and where section boundaries normally fall.
+The PDF format file is not a source decision to extract into the JSON output. It is a guide for how TPPO decisions are usually ordered and where section boundaries normally fall.
 
 Common TPPO decision variants in the format:
 
@@ -90,33 +146,101 @@ Use this expected order to resolve ambiguous boundaries:
 
 ## Field-Level Extraction Context
 
-- Columns 6-13, defendant identity: extract only the value for that identity field. For multiple defendants, put all defendants' values in the same cell in document order, preserving labels such as `Terdakwa I` when present.
-- Column 10, Kebangsaan: treat `Kewarganegaraan` as the same field if the decision uses that wording.
-- Column 14, Penangkapan: include only the arrest wording (`ditangkap sejak tanggal... sampai dengan...`, `ditangkap pada...`, or equivalent). Do not include detention stages here.
-- Column 15, Penahanan: include every detention stage and extension. Search for the exact TPPO marker `Khusus Penahanan Tindak Pidana TPPO`; TPPO templates may list up to 12 stages, including first/second extensions by Ketua Pengadilan Negeri and Ketua Pengadilan Tinggi. Also include suspension, hospitalization/interruption, transfer, or `ditahan dalam perkara lain` if present.
-- Column 16, Tuntutan: extract the copied prosecution demand after `Setelah mendengar pembacaan tuntutan pidana... pada pokoknya sebagai berikut`. Include requested imprisonment, fine, restitution, evidence disposition, and costs if they appear in the demand.
-- Column 17, Dakwaan: extract the complete charge text after `didakwa berdasarkan surat dakwaan Penuntut Umum Nomor... tanggal... sebagai berikut`. Keep all forms: tunggal, alternatif, subsidairitas, kumulatif, or gabungan.
-- Column 18, Saksi: include prosecution witnesses, defense witnesses (`saksi yang meringankan` / `a de charge`), and verbalisan witnesses when present. Preserve witness names, oath status, testimony bullets, and defendant responses.
-- Column 19, Ahli: include prosecution and defense experts, including expert statements read into court.
-- Column 20, Terdakwa: extract the defendant's own courtroom statement beginning around `Terdakwa/Para Terdakwa di persidangan telah memberikan keterangan...`.
-- Column 21, Surat: include documentary and electronic evidence under `Surat (termasuk alat bukti elektronik)` or equivalent.
-- Column 22, Petunjuk/Barang Bukti: include the submitted goods/evidence inventory, usually after `Penuntut Umum mengajukan barang bukti sebagai berikut`. Do not move later evidence-disposition reasoning into this column.
-- Column 23, Fakta Hukum: starts at `berdasarkan keterangan saksi-saksi... diperoleh fakta hukum sebagai berikut` and ends before `Majelis Hakim akan mempertimbangkan...`.
-- Column 24, Pertimbangan Hukum: includes dakwaan element analysis, conclusions about fulfilled/unfulfilled elements, TPPO restitution consideration, detention reasoning, evidence-disposition reasoning, aggravating/mitigating factors, costs, and `Mengingat...` up to but not including `MENGADILI`.
-- Column 25, Amar Putusan: starts at `MENGADILI` and includes every numbered operative order. For TPPO conviction, include restitution orders such as payment to victim/heirs, 14-day warning period, seizure/auction by prosecutor, and substitute imprisonment if present.
-- Columns 26-31, closing fields: parse from `Demikianlah diputuskan...` and the signature block. `Hari`, `Tanggal`, and `Tahun` refer to the deliberation decision date unless the workbook task explicitly asks for pronouncement date. `Siapa yang Memutus` is the deciding judges named after `oleh ... sebagai Hakim Ketua ... masing-masing sebagai Hakim Anggota`. `Panitera Pengganti` is the clerk after `dibantu oleh`. `Tanda Tangan Majelis` is the signature block beginning around `Hakim-hakim Anggota` / `Hakim Ketua` through `Panitera Pengganti`.
+- Fields 6-13, defendant identity: extract only the value for that identity field. For multiple defendants, put all defendants' values in the same section array in document order, preserving labels such as `Terdakwa I` when present.
+- Field 10, Kebangsaan: treat `Kewarganegaraan` as the same field if the decision uses that wording.
+- Field 14, Penangkapan: include only the arrest wording (`ditangkap sejak tanggal... sampai dengan...`, `ditangkap pada...`, or equivalent). Do not include detention stages here.
+- Field 15, Penahanan: include every detention stage and extension. Search for the exact TPPO marker `Khusus Penahanan Tindak Pidana TPPO`; TPPO templates may list up to 12 stages, including first/second extensions by Ketua Pengadilan Negeri and Ketua Pengadilan Tinggi. Also include suspension, hospitalization/interruption, transfer, or `ditahan dalam perkara lain` if present.
+- Field 16, Tuntutan: extract the copied prosecution demand after `Setelah mendengar pembacaan tuntutan pidana... pada pokoknya sebagai berikut`. Include requested imprisonment, fine, restitution, evidence disposition, and costs if they appear in the demand.
+- Field 17, Dakwaan: extract the complete charge text after `didakwa berdasarkan surat dakwaan Penuntut Umum Nomor... tanggal... sebagai berikut`. Keep all forms: tunggal, alternatif, subsidairitas, kumulatif, or gabungan.
+- Field 18, Saksi: include prosecution witnesses, defense witnesses (`saksi yang meringankan` / `a de charge`), and verbalisan witnesses when present. Preserve witness names, oath status, testimony bullets, and defendant responses.
+- Field 19, Ahli: include prosecution and defense experts, including expert statements read into court.
+- Field 20, Terdakwa: extract the defendant's own courtroom statement beginning around `Terdakwa/Para Terdakwa di persidangan telah memberikan keterangan...`.
+- Field 21, Surat: include documentary and electronic evidence under `Surat (termasuk alat bukti elektronik)` or equivalent.
+- Field 22, Petunjuk/Barang Bukti: include the submitted goods/evidence inventory, usually after `Penuntut Umum mengajukan barang bukti sebagai berikut`. Do not move later evidence-disposition reasoning into this field.
+- Field 23, Fakta Hukum: starts at `berdasarkan keterangan saksi-saksi... diperoleh fakta hukum sebagai berikut` and ends before `Majelis Hakim akan mempertimbangkan...`.
+- Field 24, Pertimbangan Hukum: includes dakwaan element analysis, conclusions about fulfilled/unfulfilled elements, TPPO restitution consideration, detention reasoning, evidence-disposition reasoning, aggravating/mitigating factors, costs, and `Mengingat...` up to but not including `MENGADILI`.
+- Field 25, Amar Putusan: starts at `MENGADILI` and includes every numbered operative order. For TPPO conviction, include restitution orders such as payment to victim/heirs, 14-day warning period, seizure/auction by prosecutor, and substitute imprisonment if present.
+- Fields 26-31, closing fields: parse from `Demikianlah diputuskan...` and the signature block. `Hari`, `Tanggal`, and `Tahun` refer to the deliberation decision date unless the task explicitly asks for pronouncement date. `Siapa yang Memutus` is the deciding judges named after `oleh ... sebagai Hakim Ketua ... masing-masing sebagai Hakim Anggota`. `Panitera Pengganti` is the clerk after `dibantu oleh`. `Tanda Tangan Majelis` is the signature block beginning around `Hakim-hakim Anggota` / `Hakim Ketua` through `Panitera Pengganti`.
 
-## Workbook Rules
+## Legacy Workbook Note
 
-The spreadsheet has 31 columns matching `Putusan-schema.md`.
+Legacy workbook extraction is deprecated for the GPT/Codex path. Do not target the deleted workbook unless the user explicitly restores it and asks for spreadsheet output.
 
-Write each processed document into the next empty row of sheet `TPPO New`.
+## JSON Output Rules
 
-Fill every column. If a section is absent, unclear, or does not match schema boundaries cleanly, write a short extraction-status note in that cell, for example `Reasoning: bagian tidak ditemukan dalam teks mentah`. Use this only when no actual extractable text exists for that cell.
+Create one JSON object per processed raw-text file and save it as one separate file in:
 
-Do not overwrite existing completed rows. Use the checkpoint and workbook contents as authoritative state.
+`LLM-aggregator/TPPO/GPT/output/`
 
-## Required Columns
+Use the raw-text source stem as the output filename. For example:
+
+`downloads/TPPO/raw-text/10_Pid.Sus_2025_PN_End.txt`
+
+must be saved as:
+
+`LLM-aggregator/TPPO/GPT/output/10_Pid.Sus_2025_PN_End.json`
+
+The object must validate against:
+
+`LLM-aggregator/TPPO/GPT/TPPO.json`
+
+Use this output shape:
+
+```json
+{
+  "status": "completed",
+  "source_file": "example.txt",
+  "source_path": "downloads/TPPO/raw-text/example.txt",
+  "source_sha256": "<64 hex chars>",
+  "sections": {
+    "judul": [],
+    "nomor_putusan": [],
+    "irah_irah": [],
+    "nama_pengadilan_negeri": [],
+    "keterangan_perkara": [],
+    "nama_lengkap": [],
+    "tempat_lahir": [],
+    "umur_tanggal_lahir": [],
+    "jenis_kelamin": [],
+    "kebangsaan": [],
+    "tempat_tinggal": [],
+    "agama": [],
+    "pekerjaan": [],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [],
+    "pertimbangan_hukum": [],
+    "amar_putusan": [],
+    "hari": [],
+    "tanggal": [],
+    "tahun": [],
+    "siapa_yang_memutus": [],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": []
+  },
+  "empty_sections": [],
+  "method": "codex_manual_extractive"
+}
+```
+
+Every section value is an array. Put exact copied source excerpts in the array. Use multiple array items only for multiple defendants or genuinely separate occurrences. Use `[]` only when no exact source excerpt exists after checking the field label, schema boundaries, aliases, and OCR variants.
+
+Do not write extraction-status prose, reasoning, or summaries inside `sections`. If a section is absent, leave that section as `[]` and include its key in `empty_sections`.
+
+Do not write multiple source documents into the same JSON file. For the 500-file TPPO corpus, expect up to 500 individual JSON output files in `LLM-aggregator/TPPO/GPT/output/`.
+
+A combined corpus JSON may be generated later as a derived export, but it is not the working extraction format and must not replace the per-source files.
+
+Do not overwrite an existing completed output unless the checkpoint is being intentionally reset or the user asks to redo that source.
+
+## Required Section Keys
 
 1. Judul
 2. Nomor Putusan
@@ -155,6 +279,8 @@ Do not overwrite existing completed rows. Use the checkpoint and workbook conten
 Before final response:
 
 - Confirm the intended number of new documents were processed.
-- Confirm each new workbook row has 31 populated cells.
+- Confirm each new JSON output has all 31 section keys.
+- Confirm each non-empty section value is copied from the source text as a contiguous excerpt.
+- Confirm `empty_sections` exactly matches the section keys whose arrays are empty.
 - Confirm `progress.jsonl` has one completed checkpoint entry per processed document.
-- Report the processed filenames and row numbers.
+- Report the processed filenames and output paths.

@@ -23,6 +23,8 @@ LLM-aggregator/Anak/Deepseek/pause
 LLM-aggregator/**/progress.jsonl
 LLM-aggregator/**/logs/
 LLM-aggregator/**/output/
+LLM-aggregator/**/reports/
+LLM-aggregator/**/last-codex-run.md
 
 # Generated artifacts and dependency installs
 outputs/

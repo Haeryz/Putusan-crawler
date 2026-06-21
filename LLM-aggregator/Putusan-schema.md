@@ -11,6 +11,94 @@ The section content lies between any matched `kata_sebelum` and any matched `kat
 
 ---
 
+## Codex Extractor JSON Schema
+
+For TPPO Codex extraction, the machine-readable JSON Schema is:
+
+`LLM-aggregator/TPPO/GPT/TPPO.json`
+
+Use that file as the canonical output contract for Codex-generated JSON artifacts. The schema requires one extraction object per source document with:
+
+- `status`: `completed`, `no_text`, or `failed`.
+- `source_file`, `source_path`, and `source_sha256`: source identity and content hash.
+- `method`: always `codex_manual_extractive`.
+- `sections`: an object containing exactly the 31 snake_case section keys listed below.
+- `empty_sections`: section keys whose arrays are empty.
+- Optional `notes`: operational notes only, never legal reasoning or extracted summaries.
+
+Every `sections.<key>` value is an array of exact contiguous source excerpts. Use an empty array only when that section is absent or cannot be located after checking the direct label, aliases, boundary variants, and OCR variants. Do not summarize, paraphrase, translate, normalize OCR text, or add reasoning inside a section value.
+
+Store each processed decision as its own JSON file under:
+
+`LLM-aggregator/TPPO/GPT/output/<source-stem>.json`
+
+Do not store all 500 TPPO extractions in one large JSON file. `TPPO.json` is the schema file only, not an aggregate extraction output. If a combined corpus JSON is needed later, generate it as a derived export from the individual files after extraction is complete.
+
+## Codex Agent Loop
+
+Run TPPO extraction as a repeatable one-file loop, not as a fixed batch prompt. Each loop iteration processes exactly one pending raw-text file:
+
+```powershell
+.\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1
+```
+
+The launcher invokes `codex exec` non-interactively and resumes from `LLM-aggregator/TPPO/GPT/progress.jsonl` plus existing files in `LLM-aggregator/TPPO/GPT/output/`.
+
+Use `-Target X` to launch X new Codex sessions. Each session extracts exactly one pending source file, then exits. `-MaxFiles` is only a backward-compatible alias for `-Target`.
+
+When `Target` is greater than 1 and less than 10, the launcher starts the target sessions in parallel and preassigns a different pending source file to each session. `Target` values of 10 or higher run sequentially to avoid excessive concurrent Codex/API processes.
+
+1. Inspect `LLM-aggregator/TPPO/GPT/progress.jsonl` and `LLM-aggregator/TPPO/GPT/output/` to choose the next unprocessed `.txt` source.
+2. Read that one source file and extract the 31 schema fields as exact source excerpts.
+3. Write one output JSON file to `LLM-aggregator/TPPO/GPT/output/<source-stem>.json`.
+4. Verify the JSON object has all 31 section keys, exact excerpt values, and accurate `empty_sections`.
+5. Append one completed checkpoint record to `progress.jsonl`.
+6. Check current Codex/session usage before starting the next file.
+
+Continue the loop one file at a time until all sources are complete, the user stops the run, or the usage guard triggers. If remaining usage is below 10% of the active five-hour reset window, stop before starting another source and create a run report under:
+
+`LLM-aggregator/TPPO/GPT/reports/`
+
+The report should include processed count, completed output paths, last source handled, pending count, usage remaining, reset timing if visible, failures or skipped files, and the exact reason the loop stopped.
+
+The schema section keys map to the numbered fields as follows:
+
+| ID | Bagian Putusan | JSON key |
+|----|----------------|----------|
+| 1 | Judul | `judul` |
+| 2 | Nomor Putusan | `nomor_putusan` |
+| 3 | Irah-irah | `irah_irah` |
+| 4 | Nama Pengadilan Negeri | `nama_pengadilan_negeri` |
+| 5 | Keterangan Perkara | `keterangan_perkara` |
+| 6 | Nama Lengkap | `nama_lengkap` |
+| 7 | Tempat Lahir | `tempat_lahir` |
+| 8 | Umur/Tanggal Lahir | `umur_tanggal_lahir` |
+| 9 | Jenis Kelamin | `jenis_kelamin` |
+| 10 | Kebangsaan | `kebangsaan` |
+| 11 | Tempat Tinggal | `tempat_tinggal` |
+| 12 | Agama | `agama` |
+| 13 | Pekerjaan | `pekerjaan` |
+| 14 | Penangkapan | `penangkapan` |
+| 15 | Penahanan | `penahanan` |
+| 16 | Tuntutan | `tuntutan` |
+| 17 | Dakwaan | `dakwaan` |
+| 18 | Saksi | `saksi` |
+| 19 | Ahli | `ahli` |
+| 20 | Terdakwa | `terdakwa` |
+| 21 | Surat | `surat` |
+| 22 | Petunjuk/Barang Bukti | `petunjuk_barang_bukti` |
+| 23 | Fakta Hukum | `fakta_hukum` |
+| 24 | Pertimbangan Hukum | `pertimbangan_hukum` |
+| 25 | Amar Putusan | `amar_putusan` |
+| 26 | Hari | `hari` |
+| 27 | Tanggal | `tanggal` |
+| 28 | Tahun | `tahun` |
+| 29 | Siapa yang Memutus | `siapa_yang_memutus` |
+| 30 | Panitera Pengganti | `panitera_pengganti` |
+| 31 | Tanda Tangan Majelis | `tanda_tangan_majelis` |
+
+---
+
 ## Agent Usage Notes
 
 - Match is **case-insensitive** unless noted.
@@ -53,7 +141,7 @@ Use the keywords below as anchors, but use the template order to decide ambiguou
 
 ### TPPO-Specific Extraction Guidance
 
-- **Defendant identity fields (6-13)**: extract only the value belonging to that numbered identity label. For multiple defendants, keep all defendants in the same cell for that field, preserving order (`Terdakwa I`, `Terdakwa II`, etc.) if present.
+- **Defendant identity fields (6-13)**: extract only the value belonging to that numbered identity label. For multiple defendants, keep all defendants in the same section array for that field, preserving order (`Terdakwa I`, `Terdakwa II`, etc.) if present.
 - **Kebangsaan (10)**: the template note says this may appear as `Kewarganegaraan` under PERMA 9 Tahun 2017. Treat `Kebangsaan`, `Kewarganegaraan`, and nationality/citizenship wording as the same field.
 - **Penangkapan (14)**: include the full arrest sentence beginning with `ditangkap sejak tanggal` or `ditangkap pada` through its end date/order reference. If no arrest is stated, do not borrow detention text.
 - **Penahanan (15)**: include all detention stages under the relevant detention paragraph. For TPPO, search for the exact marker `Khusus Penahanan Tindak Pidana TPPO`; the official sequence may include `Penyidik`, `Perpanjangan Penuntut Umum`, first/second `Perpanjangan Ketua Pengadilan Negeri`, `Penuntut Umum`, `Hakim/Majelis Hakim`, `Perpanjangan Ketua Pengadilan Tinggi`, and `Perpanjangan kedua Ketua Pengadilan Tinggi`. Include `Penangguhan`, `Pembantaran`, `Pengalihan Penahanan`, or `ditahan dalam perkara lain` when present.
