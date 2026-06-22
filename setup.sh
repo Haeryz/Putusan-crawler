@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
 #
-# One-shot bootstrap + run for the Sinergi Codex extractors (macOS / Linux).
+# Native one-shot bootstrap + run for the Sinergi Codex extractors (macOS/Linux).
 #
 #   ./setup.sh            # install prerequisites, then run 1 source per corpus
 #   ./setup.sh 20         # ...run 20 sources per corpus
-#   ./setup.sh --status   # install nothing extra, just show pending counts
+#   ./setup.sh --status   # just show pending/completed counts
 #
-# Installs (only what is missing): Python 3, PowerShell 7 (pwsh), Node + the
-# Codex CLI. Then runs the TPPO and Anak extraction loops via
-# LLM-aggregator/run-all-extractions.ps1.
-#
-# The raw-text inputs, progress, and outputs are committed, so a fresh clone
-# runs without any data sync. The one step that can't be automated is the
-# interactive Codex login (opens a browser; cached in ~/.codex afterwards).
+# Native: no PowerShell. The orchestrator is plain Python (run_extractions.py),
+# so the only things this installs (if missing) are Python 3 and the Codex CLI
+# (via Node). The raw-text inputs, progress, and outputs are committed, so a
+# fresh clone runs without any data sync. The one step that can't be automated
+# is the interactive Codex login (opens a browser; cached in ~/.codex after).
 #
 set -euo pipefail
 
@@ -66,36 +64,17 @@ pkg_install() {
 }
 
 # ---- Python 3 -------------------------------------------------------------
-if have python3 || have python; then
-  ok "Python 3 present ($(python3 --version 2>/dev/null || python --version))"
+PYTHON=""
+if have python3; then PYTHON="python3"
+elif have python; then PYTHON="python"
 else
   log "Installing Python 3..."
   pkg_install "Python 3" "python" "python3" "python3"
+  have python3 && PYTHON="python3" || PYTHON="python"
 fi
+ok "Python: $($PYTHON --version 2>&1)"
 
-# ---- PowerShell 7 (pwsh) --------------------------------------------------
-if have pwsh; then
-  ok "PowerShell present ($(pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null))"
-else
-  log "Installing PowerShell 7 (pwsh)..."
-  if [ "$PKG" = "brew" ]; then
-    brew install --cask powershell
-  elif [ "$PKG" = "apt" ]; then
-    # Microsoft package feed (Ubuntu/Debian).
-    sudo apt-get update -y
-    sudo apt-get install -y wget apt-transport-https software-properties-common
-    source /etc/os-release 2>/dev/null || true
-    wget -q "https://packages.microsoft.com/config/${ID:-ubuntu}/${VERSION_ID:-22.04}/packages-microsoft-prod.deb" -O /tmp/pmc.deb
-    sudo dpkg -i /tmp/pmc.deb && sudo apt-get update -y && sudo apt-get install -y powershell
-  elif [ "$PKG" = "dnf" ]; then
-    sudo dnf install -y powershell || die "Install PowerShell manually: https://learn.microsoft.com/powershell/scripting/install/install-rhel"
-  else
-    die "Install PowerShell 7 manually: https://learn.microsoft.com/powershell/scripting/install/installing-powershell"
-  fi
-  have pwsh || die "pwsh still not on PATH after install."
-fi
-
-# ---- Node + Codex CLI -----------------------------------------------------
+# ---- Codex CLI (via Node) -------------------------------------------------
 if have codex; then
   ok "Codex CLI present ($(codex --version 2>/dev/null | head -1))"
 else
@@ -135,11 +114,10 @@ else
 fi
 
 # ---- run ------------------------------------------------------------------
-RUNNER="LLM-aggregator/run-all-extractions.ps1"
 if [ "$STATUS_ONLY" -eq 1 ]; then
   log "Status for both corpora:"
-  exec pwsh -NoProfile -File "$RUNNER" -StatusOnly
+  exec "$PYTHON" run_extractions.py --status
 else
   log "Running both extractors (target $TARGET source(s) per corpus)..."
-  exec pwsh -NoProfile -File "$RUNNER" -Target "$TARGET"
+  exec "$PYTHON" run_extractions.py --target "$TARGET"
 fi

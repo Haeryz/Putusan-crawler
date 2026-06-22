@@ -5,7 +5,8 @@
 .DESCRIPTION
     Installs only what is missing (Python 3, Node.js + the Codex CLI) using
     winget, checks Codex login and the raw-text inputs, then runs both the TPPO
-    and Anak extraction loops via LLM-aggregator/run-all-extractions.ps1.
+    and Anak extraction loops via the native Python orchestrator
+    (run_extractions.py). No PowerShell glue is required.
 
     The raw-text inputs, progress, and outputs are committed, so a fresh clone
     runs without data sync. Only the interactive Codex login (browser) can't be
@@ -93,14 +94,13 @@ if ($tppoN -gt 0 -or $anakN -gt 0) {
 }
 
 # ---- run ------------------------------------------------------------------
-$runner = Join-Path $ROOT "LLM-aggregator/run-all-extractions.ps1"
-$hostExe = (Get-Process -Id $PID -ErrorAction SilentlyContinue).Path
-if (-not $hostExe) { $hostExe = "powershell.exe" }
+# The orchestrator is native Python (run_extractions.py) -- no PowerShell glue.
+$py = if (Test-Cmd "python") { "python" } elseif (Test-Cmd "python3") { "python3" } else { "py" }
 if ($StatusOnly) {
     Write-Step "Status for both corpora:"
-    & $hostExe -NoProfile -File $runner -StatusOnly
+    & $py "run_extractions.py" --status
 } else {
     Write-Step "Running both extractors (target $Target source(s) per corpus)..."
-    & $hostExe -NoProfile -File $runner -Target $Target
+    & $py "run_extractions.py" --target $Target
 }
 exit $LASTEXITCODE

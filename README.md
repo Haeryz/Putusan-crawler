@@ -41,8 +41,9 @@ cd Putusan-crawler
 powershell -ExecutionPolicy Bypass -File setup.ps1 -StatusOnly
 ```
 
-The bootstrap automatically installs anything missing — **Python 3,
-PowerShell 7 (`pwsh`), Node.js, and the Codex CLI** — then runs the extractors.
+The bootstrap automatically installs anything missing — **Python 3, Node.js,
+and the Codex CLI** — then runs the extractors. The orchestrator is native
+Python (`run_extractions.py`); no PowerShell is required on macOS/Linux.
 
 ### 4. Log in to Codex (one time, interactive)
 
@@ -62,7 +63,10 @@ To run the extractors directly once prerequisites are in place (skipping the
 installer):
 
 ```bash
-pwsh -File LLM-aggregator/run-all-extractions.ps1 -Target 1
+python3 run_extractions.py --target 1        # both corpora, 1 source each
+python3 run_extractions.py --corpus TPPO     # one corpus only
+python3 run_extractions.py --status          # counts only
+python3 run_extractions.py --jobs 4 --target 8   # 4 Codex sessions at a time
 ```
 
 ## Setup (crawler / development)
