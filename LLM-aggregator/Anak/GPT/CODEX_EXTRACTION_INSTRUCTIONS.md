@@ -2,6 +2,41 @@
 
 Use this file as the full task instruction.
 
+## Token-Optimized Span Pipeline (default since 2026-06-21)
+
+The launcher now defaults to `-Mode Span`, a token-optimized pipeline that cuts
+Codex usage by roughly half with no loss of fidelity (measured ~57% fewer
+tokens/doc vs the legacy generative loop: ~44.7k vs ~104.2k). The technique is
+span/offset extraction (extractive-QA / Pointer Networks): the model emits
+*pointers* into the source instead of regenerating the text, and a deterministic
+post-processor slices the exact contiguous excerpts. The model still performs
+every section/boundary decision; nothing is offloaded to another model.
+
+Per source, the launcher:
+
+1. Runs `lib/anak_extract.py clean` to strip the repeated Mahkamah Agung
+   boilerplate (disclaimer, page headers/footers, form-feeds — ~25-30% of every
+   file) and number the remaining lines.
+2. Sends the cleaned, line-numbered source INLINE in the prompt with the compact
+   `SPAN_EXTRACTION_SPEC.md` (no file reads, no PDF, no large guides, single
+   pass, low reasoning effort).
+3. Codex writes ONLY a small spans JSON (`.spans/<stem>.spans.json`) of
+   per-section line ranges / short literals — a few hundred output tokens
+   instead of re-emitting tens of thousands.
+4. Runs `lib/anak_extract.py expand` to slice the exact excerpts, build the
+   `Anak.json`-conforming output, validate it structurally, and append the
+   checkpoint. Short literals are snapped back to the exact source substring, so
+   excerpts are 100% verbatim.
+
+This also removes the boilerplate that the legacy loop used to copy into section
+values, so quality improves. Measure usage anytime with
+`python lib/measure_tokens.py`. Use `-Mode Legacy` to fall back to the original
+generative loop (the rest of this document).
+
+---
+
+## Legacy generative loop (reference)
+
 ## Objective
 
 Manually extract Indonesian juvenile court decision sections into individual
