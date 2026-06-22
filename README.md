@@ -3,6 +3,40 @@
 Browser crawler for downloading public Putusan MA PDF files from
 `putusan3.mahkamahagung.go.id`.
 
+## One-command extraction (TPPO + Anak)
+
+A single bootstrap installs the prerequisites (Python 3, PowerShell 7, the
+Codex CLI) and then runs both the TPPO and Anak Codex extraction loops:
+
+```bash
+# macOS / Linux
+./setup.sh            # run 5 sources per corpus
+./setup.sh 20         # run 20 sources per corpus
+./setup.sh --status   # just show pending/completed counts
+```
+
+```powershell
+# Windows (or: double-click setup.cmd)
+.\setup.cmd
+.\setup.cmd 20
+powershell -ExecutionPolicy Bypass -File setup.ps1 -StatusOnly
+```
+
+Two things can't be fully automated and are checked with clear guidance:
+
+- **Codex login** — the bootstrap runs `codex login` (opens a browser) the
+  first time; the session is then cached in `~/.codex`.
+- **Inputs** — the raw-text sources under `downloads/` are kept out of git.
+  Sync `downloads/TPPO/raw-text` and `downloads/kasus anak/raw-text` from your
+  other device (the extraction progress and outputs *are* committed, so the run
+  resumes automatically), or generate them with the crawler below.
+
+To run the extractors directly once prerequisites are in place:
+
+```bash
+pwsh -File LLM-aggregator/run-all-extractions.ps1 -Target 5
+```
+
 ## Setup
 
 ```powershell
