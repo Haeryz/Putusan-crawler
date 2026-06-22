@@ -7,8 +7,9 @@
     winget, checks Codex login and the raw-text inputs, then runs both the TPPO
     and Anak extraction loops via LLM-aggregator/run-all-extractions.ps1.
 
-    Codex login (browser) and the downloads/ inputs (kept out of git) cannot be
-    fully automated and are checked with clear guidance.
+    The raw-text inputs, progress, and outputs are committed, so a fresh clone
+    runs without data sync. Only the interactive Codex login (browser) can't be
+    automated; the bootstrap triggers it and caches the session in ~/.codex.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File setup.ps1
@@ -86,8 +87,8 @@ $anakN = @(Get-ChildItem -LiteralPath $anakIn -Filter *.txt -File -ErrorAction S
 if ($tppoN -gt 0 -or $anakN -gt 0) {
     Write-Ok "Inputs: TPPO=$tppoN  Anak=$anakN raw-text file(s)"
 } else {
-    Write-Warn2 "No raw-text inputs found under downloads/ (these are NOT in git)."
-    Write-Warn2 "Sync '$tppoIn' and '$anakIn' from your other device, or generate them via the crawler (README), then re-run."
+    Write-Warn2 "No raw-text inputs found under '$tppoIn' or '$anakIn'."
+    Write-Warn2 "These are committed to the repo, so your clone may be incomplete -- try 'git pull', or regenerate them via the crawler (README)."
     if (-not $StatusOnly) { throw "Nothing to extract without inputs." }
 }
 

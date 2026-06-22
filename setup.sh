@@ -10,9 +10,9 @@
 # Codex CLI. Then runs the TPPO and Anak extraction loops via
 # LLM-aggregator/run-all-extractions.ps1.
 #
-# Two things cannot be fully automated and are checked with clear guidance:
-#   - Codex login (opens a browser; run once and it is cached in ~/.codex)
-#   - the raw-text inputs under downloads/ (kept out of git; sync them first)
+# The raw-text inputs, progress, and outputs are committed, so a fresh clone
+# runs without any data sync. The one step that can't be automated is the
+# interactive Codex login (opens a browser; cached in ~/.codex afterwards).
 #
 set -euo pipefail
 
@@ -128,9 +128,9 @@ anak_n="$(count_txt "$anak_in")"
 if [ "$tppo_n" -gt 0 ] || [ "$anak_n" -gt 0 ]; then
   ok "Inputs: TPPO=$tppo_n  Anak=$anak_n raw-text file(s)"
 else
-  warn "No raw-text inputs found under downloads/ (these are NOT in git)."
-  warn "Sync the folders '$tppo_in' and '$anak_in' from your other device,"
-  warn "or generate them with the crawler+extractor (see README), then re-run."
+  warn "No raw-text inputs found under '$tppo_in' or '$anak_in'."
+  warn "These are committed to the repo, so your clone may be incomplete -- try"
+  warn "'git pull', or regenerate them with the crawler+extractor (see README)."
   [ "$STATUS_ONLY" -eq 0 ] && die "Nothing to extract without inputs."
 fi
 

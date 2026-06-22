@@ -3,14 +3,33 @@
 Browser crawler for downloading public Putusan MA PDF files from
 `putusan3.mahkamahagung.go.id`.
 
-## One-command extraction (TPPO + Anak)
+## Initial setup guide (run the TPPO + Anak extractors)
 
-A single bootstrap installs the prerequisites (Python 3, PowerShell 7, the
-Codex CLI) and then runs both the TPPO and Anak Codex extraction loops:
+A new machine — Windows, macOS, or Linux — only needs Git and a package manager
+before cloning. The bootstrap script installs everything else and then runs both
+extractors. The raw-text inputs, extraction progress, and outputs are all in the
+repo, so a fresh clone resumes the run automatically; **no data sync needed.**
+
+### 1. Prerequisites (install once, manually)
+
+- **Git** — to clone the repo.
+- A package manager the bootstrap can drive:
+  - **macOS** — [Homebrew](https://brew.sh) (`brew`)
+  - **Linux** — `apt` or `dnf` (usually preinstalled)
+  - **Windows** — `winget` (ships with App Installer; preinstalled on Windows 11)
+
+### 2. Clone
+
+```bash
+git clone https://github.com/Haeryz/Putusan-crawler.git
+cd Putusan-crawler
+```
+
+### 3. Run the one bootstrap command
 
 ```bash
 # macOS / Linux
-./setup.sh            # run 1 source per corpus
+./setup.sh            # install prereqs, then run 1 source per corpus
 ./setup.sh 20         # run 20 sources per corpus
 ./setup.sh --status   # just show pending/completed counts
 ```
@@ -22,22 +41,31 @@ Codex CLI) and then runs both the TPPO and Anak Codex extraction loops:
 powershell -ExecutionPolicy Bypass -File setup.ps1 -StatusOnly
 ```
 
-Two things can't be fully automated and are checked with clear guidance:
+The bootstrap automatically installs anything missing — **Python 3,
+PowerShell 7 (`pwsh`), Node.js, and the Codex CLI** — then runs the extractors.
 
-- **Codex login** — the bootstrap runs `codex login` (opens a browser) the
-  first time; the session is then cached in `~/.codex`.
-- **Inputs** — the raw-text sources under `downloads/` are kept out of git.
-  Sync `downloads/TPPO/raw-text` and `downloads/kasus anak/raw-text` from your
-  other device (the extraction progress and outputs *are* committed, so the run
-  resumes automatically), or generate them with the crawler below.
+### 4. Log in to Codex (one time, interactive)
 
-To run the extractors directly once prerequisites are in place:
+The only step that can't be fully automated: if you're not logged in, the
+bootstrap launches `codex login`, which **opens a browser**. Sign in once; the
+session is cached in `~/.codex` and reused on every later run.
+
+That's it. After login the bootstrap runs both corpora and writes results under
+`LLM-aggregator/{TPPO,Anak}/GPT/output/`, appending checkpoints to
+`progress.jsonl`. Re-run `./setup.sh N` (or `.\setup.cmd N`) to process more.
+
+> The source PDFs and crawler run-logs under `downloads/` are **not** committed
+> (too large, and the extractors don't read them). Only the `raw-text/` inputs
+> are tracked. To re-crawl PDFs and regenerate raw-text, see **Crawl** below.
+
+To run the extractors directly once prerequisites are in place (skipping the
+installer):
 
 ```bash
 pwsh -File LLM-aggregator/run-all-extractions.ps1 -Target 1
 ```
 
-## Setup
+## Setup (crawler / development)
 
 ```powershell
 uv sync

@@ -16,7 +16,17 @@ hermes-agent/
 
 # Crawler runtime state
 .browser-profile/
-downloads/
+# Ignore everything under downloads/ EXCEPT the raw-text extraction inputs, so a
+# fresh clone can run the extractors without re-crawling. Source PDFs and run
+# logs stay out of git (too large / not needed). Parent dirs are un-ignored so
+# git can descend; their other contents are re-ignored just below.
+downloads/*
+!downloads/TPPO/
+!downloads/kasus anak/
+downloads/TPPO/*
+!downloads/TPPO/raw-text/
+downloads/kasus anak/*
+!downloads/kasus anak/raw-text/
 
 # LLM aggregation runtime state
 LLM-aggregator/Anak/Deepseek/pause
