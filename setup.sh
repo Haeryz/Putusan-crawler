@@ -2,7 +2,7 @@
 #
 # One-shot bootstrap + run for the Sinergi Codex extractors (macOS / Linux).
 #
-#   ./setup.sh            # install prerequisites, then run 5 sources per corpus
+#   ./setup.sh            # install prerequisites, then run 1 source per corpus
 #   ./setup.sh 20         # ...run 20 sources per corpus
 #   ./setup.sh --status   # install nothing extra, just show pending counts
 #
@@ -26,7 +26,7 @@ warn() { printf "${c_warn}[warn]${c_off} %s\n" "$*"; }
 die()  { printf "${c_err}[fail]${c_off} %s\n" "$*" >&2; exit 1; }
 
 # ---- args -----------------------------------------------------------------
-TARGET=5
+TARGET=1
 STATUS_ONLY=0
 for a in "$@"; do
   case "$a" in

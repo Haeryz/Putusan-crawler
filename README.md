@@ -10,7 +10,7 @@ Codex CLI) and then runs both the TPPO and Anak Codex extraction loops:
 
 ```bash
 # macOS / Linux
-./setup.sh            # run 5 sources per corpus
+./setup.sh            # run 1 source per corpus
 ./setup.sh 20         # run 20 sources per corpus
 ./setup.sh --status   # just show pending/completed counts
 ```
@@ -34,7 +34,7 @@ Two things can't be fully automated and are checked with clear guidance:
 To run the extractors directly once prerequisites are in place:
 
 ```bash
-pwsh -File LLM-aggregator/run-all-extractions.ps1 -Target 5
+pwsh -File LLM-aggregator/run-all-extractions.ps1 -Target 1
 ```
 
 ## Setup

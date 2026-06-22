@@ -15,7 +15,7 @@
 #>
 param(
     [ValidateRange(1, 1000)]
-    [int]$Target = 5,
+    [int]$Target = 1,
     [string]$Model = "",
     [ValidateSet("Span", "Legacy")]
     [string]$Mode = "Span",
