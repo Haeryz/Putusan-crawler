@@ -49,10 +49,10 @@ manual transcription.
 
 From the repository root:
 
-```powershell
+```bash
 uv sync
-uv run pdf-extractor "downloads\kasus anak\pdfs" `
-  --output-dir "downloads\kasus anak\raw-text" `
+uv run pdf-extractor "downloads/kasus anak/pdfs" \
+  --output-dir "downloads/kasus anak/raw-text" \
   --workers 4
 ```
 

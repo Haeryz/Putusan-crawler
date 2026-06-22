@@ -214,11 +214,11 @@ adjudication. This establishes the practical noise floor of the benchmark.
 
 Install and run entirely through UV:
 
-```powershell
+```bash
 uv sync
-uv run pdf-extractor "downloads\kasus anak\pdfs" `
-  --output-dir "downloads\kasus anak\raw-text" `
-  --workers 4 `
+uv run pdf-extractor "downloads/kasus anak/pdfs" \
+  --output-dir "downloads/kasus anak/raw-text" \
+  --workers 4 \
   --overwrite
 uv run pytest -q
 ```

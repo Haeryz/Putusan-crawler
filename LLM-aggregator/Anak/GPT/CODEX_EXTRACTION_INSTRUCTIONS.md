@@ -66,13 +66,20 @@ unreadable.
 
 ## One-Click Launcher
 
-Start or resume the automated Codex extraction loop with:
+On macOS/Linux, start or resume the automated Codex extraction loop with the
+native shell launcher:
+
+```bash
+./LLM-aggregator/Anak/GPT/run-codex-extraction.sh
+```
+
+On Windows PowerShell, use:
 
 ```powershell
 .\LLM-aggregator\Anak\GPT\run-codex-extraction.ps1
 ```
 
-For Explorer/double-click usage, run:
+For Windows Explorer/double-click usage, run:
 
 ```cmd
 LLM-aggregator\Anak\GPT\run-codex-extraction.cmd
@@ -85,12 +92,12 @@ the launcher continues pending files.
 
 Useful controls:
 
-```powershell
-.\LLM-aggregator\Anak\GPT\run-codex-extraction.ps1 -Action Status
-.\LLM-aggregator\Anak\GPT\run-codex-extraction.ps1 -Action Prompt
-.\LLM-aggregator\Anak\GPT\run-codex-extraction.ps1 -Target 1
-.\LLM-aggregator\Anak\GPT\run-codex-extraction.ps1 -Target 10
-.\LLM-aggregator\Anak\GPT\run-codex-extraction.ps1 -Model gpt-5-codex
+```bash
+./LLM-aggregator/Anak/GPT/run-codex-extraction.sh -Action Status
+./LLM-aggregator/Anak/GPT/run-codex-extraction.sh -Action Prompt
+./LLM-aggregator/Anak/GPT/run-codex-extraction.sh -Target 1
+./LLM-aggregator/Anak/GPT/run-codex-extraction.sh -Target 10
+./LLM-aggregator/Anak/GPT/run-codex-extraction.sh -Model gpt-5-codex
 ```
 
 `-Target X` launches X new Codex sessions. Each Codex session processes exactly

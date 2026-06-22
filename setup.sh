@@ -3,7 +3,7 @@
 # Native one-shot bootstrap + run for the Sinergi Codex extractors (macOS/Linux).
 #
 #   ./setup.sh            # install prerequisites, then run 1 source per corpus
-#   ./setup.sh 20         # ...run 20 sources per corpus
+#   ./setup.sh 20         # run 20 sources per corpus
 #   ./setup.sh --status   # just show pending/completed counts
 #
 # Native: no PowerShell. The orchestrator is plain Python (run_extractions.py),
@@ -23,7 +23,6 @@ ok()   { printf "${c_ok}[ ok ]${c_off} %s\n" "$*"; }
 warn() { printf "${c_warn}[warn]${c_off} %s\n" "$*"; }
 die()  { printf "${c_err}[fail]${c_off} %s\n" "$*" >&2; exit 1; }
 
-# ---- args -----------------------------------------------------------------
 TARGET=1
 STATUS_ONLY=0
 for a in "$@"; do
@@ -37,7 +36,6 @@ done
 OS="$(uname -s)"
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# ---- package-manager abstraction -----------------------------------------
 PKG=""
 if [ "$OS" = "Darwin" ]; then
   if ! have brew; then
@@ -53,7 +51,6 @@ else
 fi
 
 pkg_install() {
-  # pkg_install <human-name> <brew-formula> <apt-pkg> <dnf-pkg>
   local name="$1" brewf="$2" aptf="$3" dnff="$4"
   case "$PKG" in
     brew) brew install $brewf ;;
@@ -63,7 +60,6 @@ pkg_install() {
   esac
 }
 
-# ---- Python 3 -------------------------------------------------------------
 PYTHON=""
 if have python3; then PYTHON="python3"
 elif have python; then PYTHON="python"
@@ -74,7 +70,6 @@ else
 fi
 ok "Python: $($PYTHON --version 2>&1)"
 
-# ---- Codex CLI (via Node) -------------------------------------------------
 if have codex; then
   ok "Codex CLI present ($(codex --version 2>/dev/null | head -1))"
 else
@@ -87,7 +82,6 @@ else
   have codex || warn "Codex installed but not on PATH; open a new shell or add npm global bin to PATH."
 fi
 
-# ---- Codex auth -----------------------------------------------------------
 CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
 if [ -f "$CODEX_HOME_DIR/auth.json" ]; then
   ok "Codex is authenticated ($CODEX_HOME_DIR/auth.json)"
@@ -98,7 +92,6 @@ else
   fi
 fi
 
-# ---- input data check -----------------------------------------------------
 tppo_in="downloads/TPPO/raw-text"
 anak_in="downloads/kasus anak/raw-text"
 count_txt() { ls "$1"/*.txt >/dev/null 2>&1 && ls "$1"/*.txt 2>/dev/null | wc -l | tr -d ' ' || echo 0; }
@@ -113,7 +106,6 @@ else
   [ "$STATUS_ONLY" -eq 0 ] && die "Nothing to extract without inputs."
 fi
 
-# ---- run ------------------------------------------------------------------
 if [ "$STATUS_ONLY" -eq 1 ]; then
   log "Status for both corpora:"
   exec "$PYTHON" run_extractions.py --status

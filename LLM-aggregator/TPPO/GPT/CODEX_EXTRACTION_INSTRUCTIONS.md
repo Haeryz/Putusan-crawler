@@ -30,13 +30,20 @@ Do not waste time extracting from PDFs unless the raw text is missing or unreada
 
 ## One-Click Launcher
 
-Start or resume the automated Codex extraction loop with:
+On macOS/Linux, start or resume the automated Codex extraction loop with the
+native shell launcher:
+
+```bash
+./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh
+```
+
+On Windows PowerShell, use:
 
 ```powershell
 .\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1
 ```
 
-For Explorer/double-click usage, run:
+For Windows Explorer/double-click usage, run:
 
 ```cmd
 LLM-aggregator\TPPO\GPT\run-codex-extraction.cmd
@@ -46,11 +53,11 @@ The launcher calls `codex exec` non-interactively, gives Codex this extraction l
 
 Useful controls:
 
-```powershell
-.\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1 -Action Status
-.\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1 -Target 1
-.\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1 -Target 10
-.\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1 -Model gpt-5-codex
+```bash
+./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh -Action Status
+./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh -Target 1
+./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh -Target 10
+./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh -Model gpt-5-codex
 ```
 
 `-Target X` means launch X new Codex sessions. Each Codex session processes exactly one pending source file, writes/checkpoints it, then exits. `-MaxFiles` is accepted as a backward-compatible alias for `-Target`; it does not mean multiple files inside one Codex session.

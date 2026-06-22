@@ -3,20 +3,21 @@
 Browser crawler for downloading public Putusan MA PDF files from
 `putusan3.mahkamahagung.go.id`.
 
-## Initial setup guide (run the TPPO + Anak extractors)
+## Initial Setup Guide
 
-A new machine — Windows, macOS, or Linux — only needs Git and a package manager
-before cloning. The bootstrap script installs everything else and then runs both
-extractors. The raw-text inputs, extraction progress, and outputs are all in the
-repo, so a fresh clone resumes the run automatically; **no data sync needed.**
+A new machine, including a MacBook or other Apple device, only needs Git and a
+package manager before cloning. The bootstrap script installs everything else
+and can run the TPPO and Anak extractors. The raw-text inputs, extraction
+progress, and outputs are tracked in the repo, so a fresh clone resumes the run
+automatically.
 
-### 1. Prerequisites (install once, manually)
+### 1. Prerequisites
 
-- **Git** — to clone the repo.
+- Git, to clone the repo.
 - A package manager the bootstrap can drive:
-  - **macOS** — [Homebrew](https://brew.sh) (`brew`)
-  - **Linux** — `apt` or `dnf` (usually preinstalled)
-  - **Windows** — `winget` (ships with App Installer; preinstalled on Windows 11)
+  - macOS: Homebrew (`brew`)
+  - Linux: `apt` or `dnf`
+  - Windows: `winget`
 
 ### 2. Clone
 
@@ -25,60 +26,78 @@ git clone https://github.com/Haeryz/Putusan-crawler.git
 cd Putusan-crawler
 ```
 
-### 3. Run the one bootstrap command
+### 3. Run Setup
+
+macOS/Linux:
 
 ```bash
-# macOS / Linux
-./setup.sh            # install prereqs, then run 1 source per corpus
+chmod +x setup.sh
+./setup.sh            # install prerequisites, then run 1 source per corpus
 ./setup.sh 20         # run 20 sources per corpus
-./setup.sh --status   # just show pending/completed counts
+./setup.sh --status   # show pending/completed counts only
 ```
 
+Windows:
+
 ```powershell
-# Windows (or: double-click setup.cmd)
 .\setup.cmd
 .\setup.cmd 20
 powershell -ExecutionPolicy Bypass -File setup.ps1 -StatusOnly
 ```
 
-The bootstrap automatically installs anything missing — **Python 3, Node.js,
-and the Codex CLI** — then runs the extractors. The orchestrator is native
-Python (`run_extractions.py`); no PowerShell is required on macOS/Linux.
+The macOS/Linux setup path is native Unix. It uses `setup.sh` and the Python
+orchestrator `run_extractions.py`; it does not require PowerShell. If Codex is
+not logged in, setup launches `codex login`, which opens a browser. Sign in
+once; the session is cached in `~/.codex`.
 
-### 4. Log in to Codex (one time, interactive)
+### 4. Run TPPO or Anak Independently
 
-The only step that can't be fully automated: if you're not logged in, the
-bootstrap launches `codex login`, which **opens a browser**. Sign in once; the
-session is cached in `~/.codex` and reused on every later run.
-
-That's it. After login the bootstrap runs both corpora and writes results under
-`LLM-aggregator/{TPPO,Anak}/GPT/output/`, appending checkpoints to
-`progress.jsonl`. Re-run `./setup.sh N` (or `.\setup.cmd N`) to process more.
-
-> The source PDFs and crawler run-logs under `downloads/` are **not** committed
-> (too large, and the extractors don't read them). Only the `raw-text/` inputs
-> are tracked. To re-crawl PDFs and regenerate raw-text, see **Crawl** below.
-
-To run the extractors directly once prerequisites are in place (skipping the
-installer):
+After setup, run both corpora:
 
 ```bash
-python3 run_extractions.py --target 1        # both corpora, 1 source each
-python3 run_extractions.py --corpus TPPO     # one corpus only
-python3 run_extractions.py --status          # counts only
-python3 run_extractions.py --jobs 4 --target 8   # 4 Codex sessions at a time
+python3 run_extractions.py --target 1
+python3 run_extractions.py --jobs 4 --target 8
 ```
 
-## Setup (crawler / development)
+Run TPPO only:
 
-```powershell
+```bash
+python3 run_extractions.py --corpus TPPO --target 1
+python3 run_extractions.py --corpus TPPO --status
+```
+
+Run Anak only:
+
+```bash
+python3 run_extractions.py --corpus Anak --target 1
+python3 run_extractions.py --corpus Anak --status
+```
+
+Useful controls:
+
+```bash
+python3 run_extractions.py --model gpt-5-codex --target 1
+python3 run_extractions.py --reasoning-effort low --target 1
+python3 run_extractions.py --keep-mcp --target 1
+```
+
+`--target N` processes up to N pending sources per selected corpus. `--jobs N`
+runs up to N Codex sessions in parallel per corpus.
+
+> Source PDFs and crawler run logs under `downloads/` are not committed because
+> they are large and the extractors do not read them. The raw-text inputs are
+> tracked. To re-crawl PDFs and regenerate raw text, see **Crawl** below.
+
+## Setup For Crawler Development
+
+```bash
 uv sync
 uv run playwright install chromium
 ```
 
 ## Crawl
 
-```powershell
+```bash
 uv run sinergi crawl --target-downloads 10
 ```
 
@@ -94,14 +113,14 @@ crawler only accepts URLs from `putusan3.mahkamahagung.go.id`; alternative
 download sites are rejected.
 
 Downloaded PDFs are saved to `downloads/pdfs/`. Successful records are written
-to `downloads/downloaded.jsonl`; skipped pages and exhausted failures are written
-to `downloads/skipped.jsonl`; retry details go to `downloads/run.log`. Listing
-crawls skip already downloaded detail pages, while explicit `--detail-url` and
-`--detail-file` inputs are always processed again.
+to `downloads/downloaded.jsonl`; skipped pages and exhausted failures are
+written to `downloads/skipped.jsonl`; retry details go to `downloads/run.log`.
+Listing crawls skip already downloaded detail pages, while explicit
+`--detail-url` and `--detail-file` inputs are always processed again.
 
 Useful options:
 
-```powershell
+```bash
 uv run sinergi crawl --target-downloads 10 --out-dir downloads --profile-dir .browser-profile
 uv run sinergi crawl --target-downloads 10 --max-candidates 200
 uv run sinergi crawl --target-downloads 1 --timeout-seconds 180
@@ -118,11 +137,11 @@ uv run sinergi crawl --target-downloads 10 --restart-listing
 uv run sinergi crawl --target-downloads 10 --new-target
 ```
 
-Listing pagination is resumable. The crawler stores the interrupted listing page in
-`<out-dir>/crawl-state.json` and resumes there on the next run, while still skipping
-case URLs already recorded in `downloaded.jsonl`. Use `--restart-listing` only when
-you intentionally want to discard that pagination checkpoint and scan from the
-configured start URL.
+Listing pagination is resumable. The crawler stores the interrupted listing
+page in `<out-dir>/crawl-state.json` and resumes there on the next run, while
+still skipping case URLs already recorded in `downloaded.jsonl`. Use
+`--restart-listing` only when you intentionally want to discard that pagination
+checkpoint and scan from the configured start URL.
 
 Numeric download targets are also resumable. If a target of 264 is interrupted
 after 123 verified downloads, running the same target again continues with the

@@ -38,11 +38,12 @@ Do not store all 500 TPPO extractions in one large JSON file. `TPPO.json` is the
 
 Run TPPO extraction as a repeatable one-file loop, not as a fixed batch prompt. Each loop iteration processes exactly one pending raw-text file:
 
-```powershell
-.\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1
+```bash
+./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh
 ```
 
 The launcher invokes `codex exec` non-interactively and resumes from `LLM-aggregator/TPPO/GPT/progress.jsonl` plus existing files in `LLM-aggregator/TPPO/GPT/output/`.
+On Windows, use `.\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1` or the `.cmd` wrapper instead.
 
 Use `-Target X` to launch X new Codex sessions. Each session extracts exactly one pending source file, then exits. `-MaxFiles` is only a backward-compatible alias for `-Target`.
 
