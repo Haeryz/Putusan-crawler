@@ -40,7 +40,12 @@ function Initialize-CodexNoMcpHome {
         Join-Path $HOME ".cache"
     }
     $altHome = Join-Path $dataRoot "sinergi-codex-nomcp"
-    New-Item -ItemType Directory -Force -Path $altHome | Out-Null
+    try {
+        New-Item -ItemType Directory -Force -Path $altHome | Out-Null
+    } catch {
+        Write-Warning "Could not create MCP-disabled Codex home at $altHome; running with MCP enabled. $_"
+        return $null
+    }
 
     # Drop every MCP-providing table block. MCP servers come from three places:
     #   [mcp_servers.*]   - directly configured servers
@@ -57,7 +62,12 @@ function Initialize-CodexNoMcpHome {
         if ($line -match '^\s*\[') { $skip = ($line -match $dropPattern) }
         if (-not $skip) { $kept.Add($line) }
     }
-    Set-Content -LiteralPath (Join-Path $altHome "config.toml") -Value $kept -Encoding UTF8
+    try {
+        Set-Content -LiteralPath (Join-Path $altHome "config.toml") -Value $kept -Encoding UTF8
+    } catch {
+        Write-Warning "Could not write MCP-disabled Codex config at $altHome; running with MCP enabled. $_"
+        return $null
+    }
 
     # Codex may have synced a plugins/ directory into the alt home on earlier
     # runs; remove it so nothing reloads a plugin MCP independently of config.

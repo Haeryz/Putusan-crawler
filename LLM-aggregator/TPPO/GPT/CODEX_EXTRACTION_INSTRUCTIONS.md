@@ -31,10 +31,10 @@ Do not waste time extracting from PDFs unless the raw text is missing or unreada
 ## One-Click Launcher
 
 On macOS/Linux, start or resume the automated Codex extraction loop with the
-native shell launcher:
+native Python launcher:
 
 ```bash
-./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh
+python3 run_extractions.py --corpus TPPO
 ```
 
 On Windows PowerShell, use:
@@ -54,15 +54,15 @@ The launcher calls `codex exec` non-interactively, gives Codex this extraction l
 Useful controls:
 
 ```bash
-./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh -Action Status
-./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh -Target 1
-./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh -Target 10
-./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh -Model gpt-5-codex
+python3 run_extractions.py --corpus TPPO --status
+python3 run_extractions.py --corpus TPPO --target 1
+python3 run_extractions.py --corpus TPPO --target 10
+python3 run_extractions.py --corpus TPPO --model gpt-5-codex
 ```
 
-`-Target X` means launch X new Codex sessions. Each Codex session processes exactly one pending source file, writes/checkpoints it, then exits. `-MaxFiles` is accepted as a backward-compatible alias for `-Target`; it does not mean multiple files inside one Codex session.
+With no target, the launcher processes all pending sources one at a time until the 5h usage guard stops it, a failure occurs, or the corpus is complete. `-Target X` / `--target X` means launch up to X new Codex sessions. Each Codex session processes exactly one pending source file, writes/checkpoints it, then exits. `-MaxFiles` is accepted as a backward-compatible PowerShell alias for `-Target`; it does not mean multiple files inside one Codex session.
 
-When `Target` is greater than 1 and less than 10, the launcher starts those Codex sessions in parallel. For example, `-Target 4` starts four Codex sessions at once, each preassigned to a different pending source file. `-Target 10` or higher runs sequentially to avoid overloading the machine/API.
+Guarded AFK runs are sequential so usage can be checked before every next source. Parallel sessions are available only when the usage guard is disabled.
 
 ## Agent Loop
 
@@ -85,6 +85,7 @@ Loop steps:
 Usage guard:
 
 - If remaining usage is below 10% of the active five-hour reset window, stop before starting another source.
+- If `/status` text is unavailable to the non-interactive launcher, the 270-minute wall-clock fallback stops before starting another source.
 - Do not begin a large source when usage is already under the 10% threshold.
 - Create a Markdown run report under `LLM-aggregator/TPPO/GPT/reports/` before the final response.
 - Name the report with a timestamp, for example `20260620-181500-usage-stop.md`.

@@ -20,8 +20,8 @@
     powershell -ExecutionPolicy Bypass -File setup.ps1 -StatusOnly
 #>
 param(
-    [ValidateRange(1, 1000)]
-    [int]$Target = 1,
+    [ValidateRange(0, 100000)]
+    [int]$Target = 0,
     [switch]$StatusOnly
 )
 
@@ -100,7 +100,11 @@ if ($StatusOnly) {
     Write-Step "Status for both corpora:"
     & $py "run_extractions.py" --status
 } else {
-    Write-Step "Running both extractors (target $Target source(s) per corpus)..."
+    if ($Target -eq 0) {
+        Write-Step "Running both extractors in AFK mode (all pending until usage guard stops)..."
+    } else {
+        Write-Step "Running both extractors (target $Target source(s) per corpus)..."
+    }
     & $py "run_extractions.py" --target $Target
 }
 exit $LASTEXITCODE

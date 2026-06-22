@@ -39,15 +39,15 @@ Do not store all 500 TPPO extractions in one large JSON file. `TPPO.json` is the
 Run TPPO extraction as a repeatable one-file loop, not as a fixed batch prompt. Each loop iteration processes exactly one pending raw-text file:
 
 ```bash
-./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh
+python3 run_extractions.py --corpus TPPO
 ```
 
 The launcher invokes `codex exec` non-interactively and resumes from `LLM-aggregator/TPPO/GPT/progress.jsonl` plus existing files in `LLM-aggregator/TPPO/GPT/output/`.
 On Windows, use `.\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1` or the `.cmd` wrapper instead.
 
-Use `-Target X` to launch X new Codex sessions. Each session extracts exactly one pending source file, then exits. `-MaxFiles` is only a backward-compatible alias for `-Target`.
+With no target, the launcher processes all pending sources one at a time until the usage guard stops it, a failure occurs, or the corpus is complete. Use `-Target X` / `--target X` to launch up to X new Codex sessions. Each session extracts exactly one pending source file, then exits. `-MaxFiles` is only a backward-compatible PowerShell alias for `-Target`.
 
-When `Target` is greater than 1 and less than 10, the launcher starts the target sessions in parallel and preassigns a different pending source file to each session. `Target` values of 10 or higher run sequentially to avoid excessive concurrent Codex/API processes.
+Guarded AFK runs are sequential so usage can be checked before every next source. Parallel sessions are available only when the usage guard is disabled.
 
 1. Inspect `LLM-aggregator/TPPO/GPT/progress.jsonl` and `LLM-aggregator/TPPO/GPT/output/` to choose the next unprocessed `.txt` source.
 2. Read that one source file and extract the 31 schema fields as exact source excerpts.
@@ -56,7 +56,7 @@ When `Target` is greater than 1 and less than 10, the launcher starts the target
 5. Append one completed checkpoint record to `progress.jsonl`.
 6. Check current Codex/session usage before starting the next file.
 
-Continue the loop one file at a time until all sources are complete, the user stops the run, or the usage guard triggers. If remaining usage is below 10% of the active five-hour reset window, stop before starting another source and create a run report under:
+Continue the loop one file at a time until all sources are complete, the user stops the run, or the usage guard triggers. If remaining usage is below 10% of the active five-hour reset window, or the 270-minute wall-clock fallback triggers because `/status` text is unavailable, stop before starting another source and create a run report under:
 
 `LLM-aggregator/TPPO/GPT/reports/`
 

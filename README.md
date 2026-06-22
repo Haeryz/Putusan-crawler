@@ -32,8 +32,8 @@ macOS/Linux:
 
 ```bash
 chmod +x setup.sh
-./setup.sh            # install prerequisites, then run 1 source per corpus
-./setup.sh 20         # run 20 sources per corpus
+./setup.sh            # install prerequisites, then run until usage guard stops
+./setup.sh 20         # run 20 sources per corpus for a bounded test
 ./setup.sh --status   # show pending/completed counts only
 ```
 
@@ -55,34 +55,40 @@ once; the session is cached in `~/.codex`.
 After setup, run both corpora:
 
 ```bash
+python3 run_extractions.py
 python3 run_extractions.py --target 1
-python3 run_extractions.py --jobs 4 --target 8
+python3 run_extractions.py --disable-usage-guard --jobs 4 --target 8
 ```
 
 Run TPPO only:
 
 ```bash
-python3 run_extractions.py --corpus TPPO --target 1
+python3 run_extractions.py --corpus TPPO
 python3 run_extractions.py --corpus TPPO --status
 ```
 
 Run Anak only:
 
 ```bash
-python3 run_extractions.py --corpus Anak --target 1
+python3 run_extractions.py --corpus Anak
 python3 run_extractions.py --corpus Anak --status
 ```
 
 Useful controls:
 
 ```bash
-python3 run_extractions.py --model gpt-5-codex --target 1
-python3 run_extractions.py --reasoning-effort low --target 1
-python3 run_extractions.py --keep-mcp --target 1
+python3 run_extractions.py --model gpt-5-codex
+python3 run_extractions.py --reasoning-effort low
+python3 run_extractions.py --keep-mcp
 ```
 
-`--target N` processes up to N pending sources per selected corpus. `--jobs N`
-runs up to N Codex sessions in parallel per corpus.
+By default, the extractor processes all pending sources one at a time until the
+5h usage guard stops it, a failure occurs, or the corpus is complete. `--target
+N` limits the run to N pending sources per selected corpus. `--jobs N` runs up
+to N Codex sessions in parallel only when `--disable-usage-guard` is also set.
+The usage guard parses Codex `/status`-style text when available and also has a
+270-minute wall-clock fallback (`--max-run-minutes`) so AFK runs stop before the
+five-hour window is likely exhausted.
 
 > Source PDFs and crawler run logs under `downloads/` are not committed because
 > they are large and the extractors do not read them. The raw-text inputs are

@@ -67,10 +67,10 @@ unreadable.
 ## One-Click Launcher
 
 On macOS/Linux, start or resume the automated Codex extraction loop with the
-native shell launcher:
+native Python launcher:
 
 ```bash
-./LLM-aggregator/Anak/GPT/run-codex-extraction.sh
+python3 run_extractions.py --corpus Anak
 ```
 
 On Windows PowerShell, use:
@@ -93,22 +93,22 @@ the launcher continues pending files.
 Useful controls:
 
 ```bash
-./LLM-aggregator/Anak/GPT/run-codex-extraction.sh -Action Status
-./LLM-aggregator/Anak/GPT/run-codex-extraction.sh -Action Prompt
-./LLM-aggregator/Anak/GPT/run-codex-extraction.sh -Target 1
-./LLM-aggregator/Anak/GPT/run-codex-extraction.sh -Target 10
-./LLM-aggregator/Anak/GPT/run-codex-extraction.sh -Model gpt-5-codex
+python3 run_extractions.py --corpus Anak --status
+.\LLM-aggregator\Anak\GPT\run-codex-extraction.ps1 -Action Prompt
+python3 run_extractions.py --corpus Anak --target 1
+python3 run_extractions.py --corpus Anak --target 10
+python3 run_extractions.py --corpus Anak --model gpt-5-codex
 ```
 
-`-Target X` launches X new Codex sessions. Each Codex session processes exactly
-one pending source file, writes/checkpoints it, then exits. `-MaxFiles` is
-accepted as a backward-compatible alias for `-Target`; it does not mean
-multiple files inside one Codex session.
+With no target, the launcher processes all pending sources one at a time until
+the 5h usage guard stops it, a failure occurs, or the corpus is complete.
+`-Target X` / `--target X` launches up to X new Codex sessions. Each Codex
+session processes exactly one pending source file, writes/checkpoints it, then
+exits. `-MaxFiles` is accepted as a backward-compatible PowerShell alias for
+`-Target`; it does not mean multiple files inside one Codex session.
 
-When `Target` is greater than 1 and less than 10, the launcher starts those
-Codex sessions in parallel. Each session is preassigned to a different pending
-source file. `-Target 10` or higher runs sequentially to avoid overloading the
-machine/API.
+Guarded AFK runs are sequential so usage can be checked before every next
+source. Parallel sessions are available only when the usage guard is disabled.
 
 ## Agent Loop
 
@@ -141,6 +141,8 @@ Usage guard:
 
 - If remaining usage is below 10% of the active five-hour reset window, stop
   before starting another source.
+- If `/status` text is unavailable to the non-interactive launcher, the
+  270-minute wall-clock fallback stops before starting another source.
 - Do not begin a large source when usage is already under the 10% threshold.
 - Create a Markdown run report under `LLM-aggregator/Anak/GPT/reports/` before
   the final response.

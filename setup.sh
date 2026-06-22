@@ -2,7 +2,7 @@
 #
 # Native one-shot bootstrap + run for the Sinergi Codex extractors (macOS/Linux).
 #
-#   ./setup.sh            # install prerequisites, then run 1 source per corpus
+#   ./setup.sh            # install prerequisites, then run until usage guard stops
 #   ./setup.sh 20         # run 20 sources per corpus
 #   ./setup.sh --status   # just show pending/completed counts
 #
@@ -23,7 +23,7 @@ ok()   { printf "${c_ok}[ ok ]${c_off} %s\n" "$*"; }
 warn() { printf "${c_warn}[warn]${c_off} %s\n" "$*"; }
 die()  { printf "${c_err}[fail]${c_off} %s\n" "$*" >&2; exit 1; }
 
-TARGET=1
+TARGET=0
 STATUS_ONLY=0
 for a in "$@"; do
   case "$a" in
@@ -110,6 +110,10 @@ if [ "$STATUS_ONLY" -eq 1 ]; then
   log "Status for both corpora:"
   exec "$PYTHON" run_extractions.py --status
 else
-  log "Running both extractors (target $TARGET source(s) per corpus)..."
+  if [ "$TARGET" -eq 0 ]; then
+    log "Running both extractors in AFK mode (all pending until usage guard stops)..."
+  else
+    log "Running both extractors (target $TARGET source(s) per corpus)..."
+  fi
   exec "$PYTHON" run_extractions.py --target "$TARGET"
 fi

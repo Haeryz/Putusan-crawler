@@ -1,24 +1,29 @@
 # Putusan TPPO DeepSeek Aggregator
 
 This pipeline reads every `.txt` decision in
-`downloads/TPPO/raw-text`, asks `deepseek-ai/DeepSeek-V4-Pro` through
-W&B Inference to select verbatim source spans, validates that every returned
-span occurs in the submitted text, and writes one JSON file per decision.
+`downloads/TPPO/raw-text`, sends a cleaned line-numbered source to
+`deepseek-ai/DeepSeek-V4-Pro` through W&B Inference, and asks the model to
+return only small line spans using the same contract as the Codex extractor:
+`{"sections": {"field": {"lines": [[start, end]]}}}` / `text` / `empty`.
+Python then expands those spans into exact source excerpts, validates them, and
+writes one JSON file per decision.
 
 The model is not allowed to summarize or generate cell content. A response is
-accepted only when all 31 schema properties are present as arrays and every
-non-empty array item is an exact contiguous source excerpt. Invalid JSON,
-empty HTTP 200 responses, missing choices, rate limits, server errors, and
-non-verbatim output are retried with exponential backoff. An HTTP 200 response
-with all sections empty, or with an obvious labeled identity field omitted, is
-also rejected and retried with corrective feedback.
+accepted only when all 31 section keys are present, every line range is valid,
+and every expanded or short literal value is an exact contiguous source
+excerpt. Invalid JSON, malformed spans, empty HTTP 200 responses, missing
+choices, rate limits, server errors, and non-verbatim output are retried with
+exponential backoff. An HTTP 200 response with all sections empty, or with an
+obvious labeled identity field omitted, is also rejected and retried with
+corrective feedback.
 
-The system prompt preserves the full operational guidance from
-`LLM-aggregator/Putusan-schema.md`: each field's meaning, complete OR-joined
-BEFORE/AFTER variants, aliases, numbered labels, OCR typo variants,
-letter-spaced `MENGADILI`, the flexible defendant-testimony pattern, and the
-optional Pendidikan edge case. It explicitly requires a second search over all
-aliases and variants before returning an empty array.
+The user prompt embeds `LLM-aggregator/TPPO/GPT/SPAN_EXTRACTION_SPEC.md`,
+sanitized field guidance from
+`LLM-aggregator/TPPO/GPT/CODEX_EXTRACTION_INSTRUCTIONS.md`,
+`LLM-aggregator/Putusan-schema.md`, and the cleaned line-numbered source.
+Launcher, checkpoint, usage-guard, and Codex agent-loop directions are removed
+before the prompt is sent. DeepSeek only locates line ranges and short
+literals; deterministic Python code writes the final extraction JSON.
 
 ## Configuration
 
@@ -33,12 +38,16 @@ a W&B project, set `WANDB_PROJECT=entity/project` or pass `--project`.
 
 ## Commands
 
-### One-click PowerShell launcher
+### One-click launchers
 
-The root launcher contains all normal configuration in one place:
+The Windows and Unix launchers contain all normal configuration in one place:
 
 ```powershell
 .\LLM-aggregator\TPPO\Deepseek\run-tppo-deepseek.ps1
+```
+
+```bash
+./LLM-aggregator/TPPO/Deepseek/run-tppo-deepseek.sh
 ```
 
 Its defaults run eight parallel workers with medium reasoning, a 32,768-token
@@ -50,6 +59,16 @@ output budget per request, and the Rich live dashboard. Common controls:
 .\LLM-aggregator\TPPO\Deepseek\run-tppo-deepseek.ps1 -Action Resume
 .\LLM-aggregator\TPPO\Deepseek\run-tppo-deepseek.ps1 -Action RetryEmpty -MaxFiles 20
 .\LLM-aggregator\TPPO\Deepseek\run-tppo-deepseek.ps1 -Workers 8 -MaxFiles 100
+```
+
+Unix equivalents:
+
+```bash
+./LLM-aggregator/TPPO/Deepseek/run-tppo-deepseek.sh --status
+./LLM-aggregator/TPPO/Deepseek/run-tppo-deepseek.sh --pause
+./LLM-aggregator/TPPO/Deepseek/run-tppo-deepseek.sh --resume
+./LLM-aggregator/TPPO/Deepseek/run-tppo-deepseek.sh --retry-empty --max-files 20
+./LLM-aggregator/TPPO/Deepseek/run-tppo-deepseek.sh --workers 8 --max-files 100
 ```
 
 Edit the parameter defaults at the top of

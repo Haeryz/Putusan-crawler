@@ -2,8 +2,8 @@ param(
     [ValidateSet("Run", "Status", "Prompt")]
     [string]$Action = "Run",
     [Alias("MaxFiles")]
-    [ValidateRange(1, 1000)]
-    [int]$Target = 10,
+    [ValidateRange(0, 100000)]
+    [int]$Target = 0,
     [string]$Model = "",
     [ValidateSet("Span", "Legacy")]
     [string]$Mode = "Span",
@@ -15,6 +15,13 @@ param(
     # startup latency, and tool-schema input tokens. Disabled by default for
     # these runs; pass -DisableMcp:$false to keep them.
     [bool]$DisableMcp = $true,
+    [ValidateRange(1, 100)]
+    [int]$UsageStopPercent = 10,
+    [string]$UsageStatusFile = "",
+    [ValidateRange(1, 300)]
+    [int]$MaxRunMinutes = 270,
+    [switch]$DisableUsageGuard,
+    [switch]$DisableWallClockGuard,
     [switch]$JsonEvents,
     [switch]$NoPause
 )
@@ -25,6 +32,7 @@ $ErrorActionPreference = "Stop"
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "../../..")).Path
 Set-Location -LiteralPath $RepositoryRoot
 . (Join-Path $PSScriptRoot "../../lib/codex-no-mcp.ps1")
+. (Join-Path $PSScriptRoot "../../lib/codex-usage.ps1")
 
 # Cross-platform host detection (Windows PowerShell 5.1 has no $IsWindows).
 $IsWindowsPlatform = if (Test-Path Variable:IsWindows) { [bool]$IsWindows } else { $true }
@@ -290,6 +298,51 @@ function Add-Checkpoint {
     throw "Could not append checkpoint to $ProgressFile after retries."
 }
 
+function New-RunStopReport {
+    param(
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [int]$ProcessedCount = 0,
+        [string[]]$CompletedOutputs = @(),
+        [string]$LastSource = "",
+        [object]$UsageStatus = $null,
+        [string[]]$Failures = @()
+    )
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $reportPath = Join-Path $ReportsDir ("{0}-usage-stop.md" -f $stamp)
+    $pendingCount = @(Get-PendingSources).Count
+    $usageLine = if ($UsageStatus) {
+        "5h usage: $($UsageStatus.PercentLeft)% left; reset: $($UsageStatus.Reset); source: $($UsageStatus.Source)"
+    } else {
+        "5h usage: unavailable"
+    }
+    $completedText = if ($CompletedOutputs.Count -gt 0) { ($CompletedOutputs | ForEach-Object { "- $_" }) -join "`n" } else { "- none" }
+    $failureText = if ($Failures.Count -gt 0) { ($Failures | ForEach-Object { "- $_" }) -join "`n" } else { "- none" }
+    $resume = if ($pendingCount -gt 0) {
+        ".\LLM-aggregator\TPPO\GPT\run-codex-extraction.ps1"
+    } else {
+        "No pending sources remain."
+    }
+    $body = @"
+# Codex Extraction Stop Report
+
+- Corpus: TPPO
+- Stop reason: $Reason
+- $usageLine
+- Processed this run: $ProcessedCount
+- Last source handled: $LastSource
+- Pending sources after stop: $pendingCount
+- Recommended resume command: $resume
+
+## Completed Outputs
+$completedText
+
+## Failures Or Skipped Sources
+$failureText
+"@
+    Set-Content -LiteralPath $reportPath -Value $body -Encoding UTF8
+    Write-Host "Stop report: $reportPath"
+}
+
 if ($Action -eq "Prompt") {
     $pending = @(Get-PendingSources)
     $sourceName = if ($pending.Count -gt 0) { $pending[0].Name } else { "example.txt" }
@@ -341,18 +394,40 @@ Write-Host "Mode:      $Mode (token-optimized span extraction)"
 Write-Host "Input:     $InputDir"
 Write-Host "Output:    $OutputDir"
 Write-Host "Progress:  $ProgressFile"
-Write-Host "Target:    $Target new Codex session(s), one source per session"
+if ($Target -eq 0) {
+    Write-Host "Target:    all pending sources until usage guard stops"
+} else {
+    Write-Host "Target:    $Target new Codex session(s), one source per session"
+}
+if ($DisableUsageGuard) {
+    Write-Host "Usage:     guard disabled"
+} else {
+    Write-Host "Usage:     stop before next source when 5h limit is below $UsageStopPercent%"
+}
+if ($DisableWallClockGuard) {
+    Write-Host "WallClock: guard disabled"
+} else {
+    Write-Host "WallClock: stop before next source after $MaxRunMinutes minutes"
+}
 
-$pendingSources = @(Get-PendingSources | Select-Object -First $Target)
+$pendingSources = if ($Target -eq 0) {
+    @(Get-PendingSources)
+} else {
+    @(Get-PendingSources | Select-Object -First $Target)
+}
 if ($pendingSources.Count -eq 0) {
     Write-Host "No pending sources."
     exit 0
 }
-if ($pendingSources.Count -lt $Target) {
+if ($Target -gt 0 -and $pendingSources.Count -lt $Target) {
     Write-Host "Only $($pendingSources.Count) pending source(s) available; reducing target."
 }
 
 $runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$runStartedAt = Get-Date
+$completedThisRun = New-Object System.Collections.Generic.List[string]
+$failuresThisRun = New-Object System.Collections.Generic.List[string]
+$lastSourceHandled = ""
 
 if ($Mode -eq "Legacy") {
     # Original generative loop: the model writes the final output + checkpoint.
@@ -373,7 +448,7 @@ if ($Mode -eq "Legacy") {
 }
 
 # --- Span-extraction loop (default) ---------------------------------------
-$parallel = $pendingSources.Count -gt 1 -and $pendingSources.Count -lt 10
+$parallel = $DisableUsageGuard -and $Target -gt 0 -and $pendingSources.Count -gt 1 -and $pendingSources.Count -lt 10
 
 if ($parallel) {
     Write-Host "Execution: parallel ($($pendingSources.Count) Codex sessions)"
@@ -450,6 +525,32 @@ exit `$LASTEXITCODE
     Write-Host "Execution: sequential ($($pendingSources.Count) Codex session(s))"
     for ($sessionIndex = 1; $sessionIndex -le $pendingSources.Count; $sessionIndex++) {
         $source = $pendingSources[$sessionIndex - 1]
+        if (-not $DisableWallClockGuard) {
+            $elapsedMinutes = ((Get-Date) - $runStartedAt).TotalMinutes
+            if ($elapsedMinutes -ge $MaxRunMinutes) {
+                $reason = "wall-clock guard reached $([math]::Round($elapsedMinutes, 1)) minutes (limit $MaxRunMinutes minutes)"
+                Write-Host "Stopping before next source: $reason"
+                New-RunStopReport -Reason $reason -ProcessedCount $completedThisRun.Count `
+                    -CompletedOutputs ($completedThisRun.ToArray()) -LastSource $lastSourceHandled `
+                    -UsageStatus (Get-CodexUsageStatus -StatusFile $UsageStatusFile) -Failures ($failuresThisRun.ToArray())
+                exit 0
+            }
+        }
+        if (-not $DisableUsageGuard) {
+            $usageGate = Test-CodexUsageAllowsStart -StopPercent $UsageStopPercent -StatusFile $UsageStatusFile
+            if ($usageGate.Status) {
+                Write-Host "Usage: $($usageGate.Status.PercentLeft)% 5h left (reset $($usageGate.Status.Reset))"
+            } else {
+                Write-Warning "Codex 5h usage status is unavailable; continuing. Provide -UsageStatusFile or CODEX_5H_LIMIT_PERCENT_LEFT for a hard guard."
+            }
+            if (-not $usageGate.Allowed) {
+                Write-Host "Stopping before next source: $($usageGate.Reason)"
+                New-RunStopReport -Reason $usageGate.Reason -ProcessedCount $completedThisRun.Count `
+                    -CompletedOutputs ($completedThisRun.ToArray()) -LastSource $lastSourceHandled `
+                    -UsageStatus $usageGate.Status -Failures ($failuresThisRun.ToArray())
+                exit 0
+            }
+        }
         $numbered = Get-NumberedSource -SourcePath $source.FullName
         $spansPath = Join-Path $SpansDir ($source.BaseName + ".spans.json")
         Remove-Item -LiteralPath $spansPath -Force -ErrorAction SilentlyContinue
@@ -458,15 +559,21 @@ exit `$LASTEXITCODE
         Set-Content -LiteralPath $promptPath -Value (New-SpanPrompt -SourceName $source.Name -SpansPath $spansPath -NumberedSource $numbered) -Encoding UTF8
         Write-Host ""
         Write-Host "Session $sessionIndex of $($pendingSources.Count): $($source.Name)"
+        $lastSourceHandled = $source.Name
         $exitCode = Invoke-CodexWithPrompt -PromptPath $promptPath
         Remove-Item -LiteralPath $promptPath -Force -ErrorAction SilentlyContinue
         if ($exitCode -ne 0) {
+            $failuresThisRun.Add("$($source.Name): Codex exit $exitCode") | Out-Null
+            New-RunStopReport -Reason "Codex session failed with exit code $exitCode" -ProcessedCount $completedThisRun.Count `
+                -CompletedOutputs ($completedThisRun.ToArray()) -LastSource $lastSourceHandled `
+                -UsageStatus (Get-CodexUsageStatus -StatusFile $UsageStatusFile) -Failures ($failuresThisRun.ToArray())
             Write-Error "Codex session $sessionIndex failed with exit code $exitCode."
             exit $exitCode
         }
         $summary = Invoke-SpanExpand -SourcePath $source.FullName -SpansPath $spansPath `
             -OutputPath $outputPath -SourceName $source.Name
         Add-Checkpoint -SummaryJson $summary
+        $completedThisRun.Add($outputPath) | Out-Null
         Write-Host "Completed: $($source.Name) -> $outputPath"
     }
 }

@@ -39,8 +39,45 @@ DEFAULT_OUTPUT_DIR = Path("LLM-aggregator/Anak/Deepseek/output")
 DEFAULT_STATE = Path("LLM-aggregator/Anak/Deepseek/progress.jsonl")
 DEFAULT_ENV = Path("LLM-aggregator/Anak/Deepseek/.env")
 DEFAULT_PAUSE_FILE = Path("LLM-aggregator/Anak/Deepseek/pause")
+DEFAULT_SPAN_SPEC = Path("LLM-aggregator/Anak/GPT/SPAN_EXTRACTION_SPEC.md")
+DEFAULT_EXTRACTION_INSTRUCTIONS = Path(
+    "LLM-aggregator/Anak/GPT/CODEX_EXTRACTION_INSTRUCTIONS.md"
+)
+DEFAULT_SCHEMA_GUIDE = Path("LLM-aggregator/Anak/GPT/Putusan-schema.md")
 PROGRAM_NAME = "anak-deepseek-aggregate"
 CORPUS_LABEL = "Putusan Anak"
+
+EXTRACTION_REFERENCE_SECTIONS = {
+    "Objective",
+    "Manual Extraction Rule",
+    "Anak Format Context",
+    "TPPO Format Context",
+    "Field-Level Extraction Context",
+    "JSON Output Rules",
+    "Required Section Keys",
+    "Verification Before Finishing",
+}
+SCHEMA_DROP_SECTIONS = {
+    "Codex Agent Loop",
+    "Agent Usage Notes",
+}
+CODEX_SPECIFIC_PATTERNS = (
+    "codex exec",
+    "run-codex",
+    "codex usage",
+    "codex session",
+    "codex-specific",
+    "checkpoint",
+    "progress.jsonl",
+    "one-click launcher",
+    "usage guard",
+    "before final response",
+    "do not use another llm",
+    "external service",
+    "this is codex",
+    "codex_manual_extractive",
+    '"method": "codex_manual_extractive"',
+)
 
 SECTION_KEYS = (
     "judul",
@@ -237,31 +274,37 @@ OCR AND EDGE-CASE CHECKLIST
 """
 
 SYSTEM_PROMPT = f"""\
-You are a strictly extractive Indonesian court-decision parser.
-Never summarize, paraphrase, infer, translate, correct OCR, add labels, or create
-text. Every returned value must be copied as one exact contiguous substring from
-DOCUMENT. JSON property names are the only text that need not occur in DOCUMENT.
+You are a strictly extractive Indonesian court-decision span locator.
+Return only JSON. Do not return markdown, explanation, prose, analysis, or
+reasoning. Do not summarize, paraphrase, infer, translate, correct OCR, or
+invent text.
 
-Return one JSON object with exactly these properties:
+The user message contains one cleaned, line-numbered court decision and a
+concrete span extraction spec. Your job is only to point to exact line ranges
+or exact short literals from that line-numbered source.
+
+The output must be a single JSON object with a top-level "sections" object.
+The "sections" object must contain exactly these 31 keys:
 {", ".join(SECTION_KEYS)}
 
-Every property value must be an array of zero or more strings. Use [] when the
-section is absent. Use multiple strings only for multiple defendants or genuinely
-separate occurrences. Keep source spelling, punctuation, capitalization, and
-spacing exactly. Do not return markdown or commentary.
+Return one JSON object with exactly these properties through the top-level
+"sections" object. For every section, preserve the full schema guidance below:
+BEFORE and AFTER alternatives are OR lists. Return [] only after checking every
+listed boundary, alias, and variant. Verify all obvious "Nomor" and identity
+labels before producing the final JSON; all obvious "Nomor" and identity labels
+must map to non-empty sections when present.
 
-WORK PROCEDURE
-1. Read the entire DOCUMENT once to identify its structure and document type.
-2. Locate each of the 31 fields independently using its meaning, direct labels,
-   aliases, and all BEFORE/AFTER variants below.
-3. For directly labeled fields, extract the exact labeled value even when a
-   later boundary phrase is absent.
-4. Before returning [], search again for every alias and OCR variant.
-5. Verify every non-empty string is copied exactly and contiguously from DOCUMENT.
-6. Verify all obvious "Nomor" and identity labels have non-empty corresponding
-   properties before producing the final JSON.
+Each key must use exactly one form:
+- {{"lines": [[start, end]]}} for excerpts by inclusive 1-based line numbers.
+- {{"text": ["short literal"]}} for short values copied exactly from a source line.
+- {{"empty": true}} only when the section is genuinely absent.
 
-{BOUNDARY_GUIDE}"""
+Prefer "lines" for long sections. Use "text" only for short identity/date/court
+fields. Before using empty, search direct labels, aliases, OCR variants, and
+letter-spaced anchors again.
+
+{BOUNDARY_GUIDE}
+"""
 
 _BOILERPLATE_LINES = {
     "Mahkamah Agung Republik Indonesia",
@@ -596,6 +639,112 @@ def compact_source(raw_text: str) -> str:
     return "\n".join(kept).strip()
 
 
+def numbered_source(source_text: str) -> str:
+    return "\n".join(
+        f"{index:>4}| {line}"
+        for index, line in enumerate(source_text.splitlines(), start=1)
+    )
+
+
+def load_span_spec(path: Path) -> str:
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    return (
+        "# Fallback Span-Extraction Spec\n\n"
+        "Return {\"sections\": {...}} with each key using lines/text/empty.\n\n"
+        f"{BOUNDARY_GUIDE}"
+    )
+
+
+def markdown_level2_sections(text: str) -> list[tuple[str, list[str]]]:
+    sections: list[tuple[str, list[str]]] = []
+    current_title = ""
+    current_lines: list[str] = []
+    for line in text.splitlines():
+        match = re.match(r"^##\s+(.+?)\s*$", line)
+        if match:
+            if current_title or current_lines:
+                sections.append((current_title, current_lines))
+            current_title = match.group(1).strip()
+            current_lines = [line]
+        else:
+            current_lines.append(line)
+    if current_title or current_lines:
+        sections.append((current_title, current_lines))
+    return sections
+
+
+def drop_codex_specific_lines(text: str) -> str:
+    kept: list[str] = []
+    for line in text.splitlines():
+        folded = line.casefold()
+        if any(pattern in folded for pattern in CODEX_SPECIFIC_PATTERNS):
+            continue
+        line = re.sub(r"\bCodex Extractor\b", "Extractor", line)
+        line = re.sub(r"\bCodex\b", "the extractor", line)
+        kept.append(line)
+    return "\n".join(kept).strip()
+
+
+def load_extraction_reference(path: Path) -> str:
+    if not path.exists():
+        return ""
+    raw = path.read_text(encoding="utf-8")
+    selected: list[str] = []
+    for title, lines in markdown_level2_sections(raw):
+        if title in EXTRACTION_REFERENCE_SECTIONS:
+            selected.extend(lines)
+            selected.append("")
+    return drop_codex_specific_lines("\n".join(selected))
+
+
+def load_schema_guide(path: Path) -> str:
+    if not path.exists():
+        return ""
+    raw = path.read_text(encoding="utf-8")
+    selected: list[str] = []
+    for title, lines in markdown_level2_sections(raw):
+        if title in SCHEMA_DROP_SECTIONS:
+            continue
+        selected.extend(lines)
+    return drop_codex_specific_lines("\n".join(selected))
+
+
+def build_user_prompt(source_name: str, source_text: str) -> str:
+    spec = load_span_spec(DEFAULT_SPAN_SPEC)
+    extraction_reference = load_extraction_reference(DEFAULT_EXTRACTION_INSTRUCTIONS)
+    schema_guide = load_schema_guide(DEFAULT_SCHEMA_GUIDE)
+    return f"""\
+FILE: {source_name}
+
+You are processing exactly this one file. Do not choose another file. Do not
+open files. Everything needed is below.
+
+{spec}
+
+=== SANITIZED EXTRACTION INSTRUCTIONS REFERENCE ===
+The following reference preserves field and boundary guidance from the GPT
+extractor instructions, with operational launcher, checkpoint, and agent-loop
+directions removed. Use it only to decide which source spans belong in each
+section; still return only the span JSON contract from the span spec.
+
+{extraction_reference}
+
+=== SCHEMA GUIDE REFERENCE ===
+The following schema guide is extraction guidance only. Any operational agent
+loop or file-writing directions from the source guide have been removed.
+
+{schema_guide}
+
+=== CLEANED LINE-NUMBERED SOURCE (1-based; point line ranges into these) ===
+{numbered_source(source_text)}
+=== END SOURCE ===
+
+Return only one JSON object with top-level "sections". Every one of the 31
+section keys must be present. Stop after the JSON.
+"""
+
+
 def discover_sources(input_dir: Path) -> list[Path]:
     return sorted(
         (path for path in input_dir.iterdir() if path.is_file() and path.suffix.lower() == ".txt"),
@@ -682,6 +831,83 @@ def validate_record(
             cleaned.append(exact_excerpt)
         record[key] = cleaned
     return record
+
+
+def validate_span_record(
+    value: Mapping[str, Any],
+    source_text: str,
+) -> dict[str, list[str]]:
+    if set(value) == set(SECTION_KEYS):
+        return validate_record(value, source_text)
+
+    sections = value.get("sections")
+    if not isinstance(sections, Mapping):
+        raise ValidationError('assistant JSON must contain a "sections" object')
+
+    missing = set(SECTION_KEYS) - set(sections)
+    extra = set(sections) - set(SECTION_KEYS)
+    if missing or extra:
+        raise ValidationError(
+            f"wrong span properties; missing={sorted(missing)}, extra={sorted(extra)}"
+        )
+
+    source_lines = source_text.splitlines()
+    record: dict[str, list[str]] = {}
+    for key in SECTION_KEYS:
+        entry = sections[key]
+        if not isinstance(entry, Mapping):
+            raise ValidationError(f"{key} span entry must be an object")
+        forms = [name for name in ("lines", "text", "empty") if name in entry]
+        if len(forms) != 1:
+            raise ValidationError(f"{key} must use exactly one of lines/text/empty")
+
+        if "empty" in entry:
+            if entry["empty"] is not True:
+                raise ValidationError(f"{key}.empty must be true")
+            record[key] = []
+            continue
+
+        if "text" in entry:
+            texts = entry["text"]
+            if not isinstance(texts, list) or any(not isinstance(item, str) for item in texts):
+                raise ValidationError(f"{key}.text must be an array of strings")
+            cleaned: list[str] = []
+            for text in texts:
+                if not text:
+                    raise ValidationError(f"{key}.text contains an empty string")
+                exact = align_source_excerpt(text, source_text)
+                if exact is None:
+                    raise ValidationError(
+                        f"{key}.text is not an exact source excerpt: {text[:120]!r}"
+                    )
+                cleaned.append(exact)
+            record[key] = cleaned
+            continue
+
+        ranges = entry["lines"]
+        if (
+            not isinstance(ranges, list)
+            or not ranges
+            or any(
+                not isinstance(item, list)
+                or len(item) != 2
+                or not all(isinstance(number, int) for number in item)
+                for item in ranges
+            )
+        ):
+            raise ValidationError(f"{key}.lines must be a non-empty array of [start, end]")
+        excerpts: list[str] = []
+        for start, end in ranges:
+            if start < 1 or end < start or end > len(source_lines):
+                raise ValidationError(
+                    f"{key}.lines range [{start}, {end}] is outside 1..{len(source_lines)}"
+                )
+            excerpt = "\n".join(source_lines[start - 1:end])
+            if not excerpt.strip():
+                raise ValidationError(f"{key}.lines range [{start}, {end}] is blank")
+            excerpts.append(excerpt)
+        record[key] = excerpts
+    return validate_record(record, source_text)
 
 
 def validate_minimum_evidence(
@@ -836,10 +1062,7 @@ def call_deepseek(
         "model": MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"FILE: {source_name}\n\nDOCUMENT:\n{source_text}",
-            },
+            {"role": "user", "content": build_user_prompt(source_name, source_text)},
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0,
@@ -916,7 +1139,7 @@ def call_deepseek(
                 max_attempts,
                 "Checking schema and exact source spans",
             )
-            record = validate_record(parsed, source_text)
+            record = validate_span_record(parsed, source_text)
             validate_minimum_evidence(record, source_text)
             report(
                 "Response accepted",
@@ -940,8 +1163,9 @@ def call_deepseek(
                         "role": "user",
                         "content": (
                             "Your previous response was rejected: "
-                            f"{exc}. Try again. Extract obvious labeled fields, "
-                            "and copy every value exactly from DOCUMENT."
+                            f"{exc}. Try again using the required span JSON. "
+                            "Use line ranges for long sections and exact short "
+                            "literals only when they appear in the source."
                         ),
                     },
                 ]
