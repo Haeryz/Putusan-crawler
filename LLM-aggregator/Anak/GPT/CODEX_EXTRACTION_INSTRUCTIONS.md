@@ -73,6 +73,12 @@ native Python launcher:
 python3 run_extractions.py --corpus Anak
 ```
 
+For single-click/shell-wrapper usage on macOS/Linux, run:
+
+```bash
+./LLM-aggregator/Anak/GPT/run-codex-extraction.sh
+```
+
 On Windows PowerShell, use:
 
 ```powershell
@@ -94,6 +100,7 @@ Useful controls:
 
 ```bash
 python3 run_extractions.py --corpus Anak --status
+./LLM-aggregator/Anak/GPT/run-codex-extraction.sh --status
 .\LLM-aggregator\Anak\GPT\run-codex-extraction.ps1 -Action Prompt
 python3 run_extractions.py --corpus Anak --target 1
 python3 run_extractions.py --corpus Anak --target 10

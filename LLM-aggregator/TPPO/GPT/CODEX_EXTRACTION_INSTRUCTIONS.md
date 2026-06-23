@@ -37,6 +37,12 @@ native Python launcher:
 python3 run_extractions.py --corpus TPPO
 ```
 
+For single-click/shell-wrapper usage on macOS/Linux, run:
+
+```bash
+./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh
+```
+
 On Windows PowerShell, use:
 
 ```powershell
@@ -55,6 +61,7 @@ Useful controls:
 
 ```bash
 python3 run_extractions.py --corpus TPPO --status
+./LLM-aggregator/TPPO/GPT/run-codex-extraction.sh --status
 python3 run_extractions.py --corpus TPPO --target 1
 python3 run_extractions.py --corpus TPPO --target 10
 python3 run_extractions.py --corpus TPPO --model gpt-5-codex
