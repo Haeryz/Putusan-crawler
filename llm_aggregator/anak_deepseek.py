@@ -46,6 +46,8 @@ DEFAULT_EXTRACTION_INSTRUCTIONS = Path(
 DEFAULT_SCHEMA_GUIDE = Path("LLM-aggregator/Anak/GPT/Putusan-schema.md")
 PROGRAM_NAME = "anak-deepseek-aggregate"
 CORPUS_LABEL = "Putusan Anak"
+CORPUS_NAME = "Anak"
+FORMAT_GUIDE_NAME = "the SKKMA PDF"
 
 EXTRACTION_REFERENCE_SECTIONS = {
     "Objective",
@@ -273,37 +275,33 @@ OCR AND EDGE-CASE CHECKLIST
 - Do not confuse identity "terdakwa" fields with terdakwa trial testimony.
 """
 
-SYSTEM_PROMPT = f"""\
-You are a strictly extractive Indonesian court-decision span locator.
+SYSTEM_PROMPT = """\
 Return only JSON. Do not return markdown, explanation, prose, analysis, or
-reasoning. Do not summarize, paraphrase, infer, translate, correct OCR, or
-invent text.
+reasoning. Follow the user's extraction prompt exactly.
+"""
 
-The user message contains one cleaned, line-numbered court decision and a
-concrete span extraction spec. Your job is only to point to exact line ranges
-or exact short literals from that line-numbered source.
+GPT_SPAN_PROMPT_TEMPLATE = """\
+You are Codex running the token-optimized {corpus_name} span-extraction task in:
+{repository_root}
 
-The output must be a single JSON object with a top-level "sections" object.
-The "sections" object must contain exactly these 31 keys:
-{", ".join(SECTION_KEYS)}
+Assigned source: {input_path}
+The cleaned, line-numbered source is provided INLINE below. Do NOT open the
+source file, {format_guide_name}, {instruction_file}, or any other guide --
+everything you need is inline. Do not re-read or search files.
 
-Return one JSON object with exactly these properties through the top-level
-"sections" object. For every section, preserve the full schema guidance below:
-BEFORE and AFTER alternatives are OR lists. Return [] only after checking every
-listed boundary, alias, and variant. Verify all obvious "Nomor" and identity
-labels before producing the final JSON; all obvious "Nomor" and identity labels
-must map to non-empty sections when present.
+YOUR ONLY OUTPUT: return the spans JSON object and nothing else.
+Do NOT write the final output JSON. Do NOT edit {progress_file}. A deterministic
+post-processor expands your spans into the schema-conforming artifact and the
+checkpoint. After returning the spans JSON, stop.
 
-Each key must use exactly one form:
-- {{"lines": [[start, end]]}} for excerpts by inclusive 1-based line numbers.
-- {{"text": ["short literal"]}} for short values copied exactly from a source line.
-- {{"empty": true}} only when the section is genuinely absent.
+{span_spec}
 
-Prefer "lines" for long sections. Use "text" only for short identity/date/court
-fields. Before using empty, search direct labels, aliases, OCR variants, and
-letter-spaced anchors again.
+=== CLEANED LINE-NUMBERED SOURCE (1-based; point your line ranges into these) ===
+{numbered_source_text}
+=== END SOURCE ===
 
-{BOUNDARY_GUIDE}
+Work in a single pass: do not re-read or re-verify files. Return the spans JSON
+covering all 31 section keys, then stop.
 """
 
 _BOILERPLATE_LINES = {
@@ -712,37 +710,16 @@ def load_schema_guide(path: Path) -> str:
 
 def build_user_prompt(source_name: str, source_text: str) -> str:
     spec = load_span_spec(DEFAULT_SPAN_SPEC)
-    extraction_reference = load_extraction_reference(DEFAULT_EXTRACTION_INSTRUCTIONS)
-    schema_guide = load_schema_guide(DEFAULT_SCHEMA_GUIDE)
-    return f"""\
-FILE: {source_name}
-
-You are processing exactly this one file. Do not choose another file. Do not
-open files. Everything needed is below.
-
-{spec}
-
-=== SANITIZED EXTRACTION INSTRUCTIONS REFERENCE ===
-The following reference preserves field and boundary guidance from the GPT
-extractor instructions, with operational launcher, checkpoint, and agent-loop
-directions removed. Use it only to decide which source spans belong in each
-section; still return only the span JSON contract from the span spec.
-
-{extraction_reference}
-
-=== SCHEMA GUIDE REFERENCE ===
-The following schema guide is extraction guidance only. Any operational agent
-loop or file-writing directions from the source guide have been removed.
-
-{schema_guide}
-
-=== CLEANED LINE-NUMBERED SOURCE (1-based; point line ranges into these) ===
-{numbered_source(source_text)}
-=== END SOURCE ===
-
-Return only one JSON object with top-level "sections". Every one of the 31
-section keys must be present. Stop after the JSON.
-"""
+    return GPT_SPAN_PROMPT_TEMPLATE.format(
+        corpus_name=CORPUS_NAME,
+        repository_root=Path.cwd(),
+        input_path=f"{DEFAULT_INPUT.as_posix()}/{source_name}",
+        format_guide_name=FORMAT_GUIDE_NAME,
+        instruction_file=DEFAULT_EXTRACTION_INSTRUCTIONS.as_posix(),
+        progress_file=DEFAULT_STATE.as_posix(),
+        span_spec=spec,
+        numbered_source_text=numbered_source(source_text),
+    )
 
 
 def discover_sources(input_dir: Path) -> list[Path]:

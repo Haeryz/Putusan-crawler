@@ -27,6 +27,14 @@ def test_tppo_wrapper_uses_tppo_paths_and_shared_prompt(monkeypatch) -> None:
     assert args.pause_file == Path("LLM-aggregator/TPPO/Deepseek/pause")
     assert not args.skip_empty_text
     assert anak_deepseek.MODEL == "deepseek-ai/DeepSeek-V4-Pro"
-    assert "Return one JSON object with exactly these properties" in (
-        anak_deepseek.SYSTEM_PROMPT
+
+    prompt = anak_deepseek.build_user_prompt("sample-tppo.txt", "PUTUSAN\nNomor 2")
+    span_spec = Path("LLM-aggregator/TPPO/GPT/SPAN_EXTRACTION_SPEC.md").read_text(
+        encoding="utf-8"
     )
+    assert "You are Codex running the token-optimized TPPO span-extraction task in:" in prompt
+    assert "Assigned source: downloads/TPPO/raw-text/sample-tppo.txt" in prompt
+    assert "source file, the TPPO Format PDF" in prompt
+    assert "LLM-aggregator/TPPO/GPT/CODEX_EXTRACTION_INSTRUCTIONS.md" in prompt
+    assert "YOUR ONLY OUTPUT: return the spans JSON object and nothing else." in prompt
+    assert span_spec in prompt

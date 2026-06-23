@@ -63,31 +63,19 @@ def test_read_timeout_is_not_treated_as_infrastructure_outage() -> None:
     )
 
 
-def test_system_prompt_preserves_full_schema_guidance() -> None:
-    prompt = anak_deepseek.SYSTEM_PROMPT
-    required_schema_details = (
-        "BEFORE and AFTER alternatives are OR lists",
-        "Return [] only after checking every listed boundary",
-        "yang mengadili perkara-perkara",
-        "Jaksa Penuntut Umum",
-        "ke depan Persidangan",
-        "terdakwa membenarkannya;",
-        "melampirkan surat:",
-        "fakta-fakta hukum",
-        "bahwa dalam persidangan,",
-        "mempertimbangakan",
-        "M E N G A D I L I :",
-        "sebgai berikut:",
-        "berupa ;l",
-        "optional Roman numeral",
-        "optional Pendidikan field",
-        "all obvious \"Nomor\" and identity labels",
+def test_user_prompt_uses_gpt_span_extraction_prompt_shape() -> None:
+    prompt = anak_deepseek.build_user_prompt("sample.txt", "PUTUSAN\nNomor 1")
+    span_spec = Path("LLM-aggregator/Anak/GPT/SPAN_EXTRACTION_SPEC.md").read_text(
+        encoding="utf-8"
     )
-
-    for detail in required_schema_details:
-        assert detail in prompt
-    for index, key in enumerate(SECTION_KEYS, start=1):
-        assert f"{index} {key}" in prompt
+    assert "You are Codex running the token-optimized Anak span-extraction task in:" in prompt
+    assert "Assigned source: downloads/kasus anak/raw-text/sample.txt" in prompt
+    assert "source file, the SKKMA PDF" in prompt
+    assert "YOUR ONLY OUTPUT: return the spans JSON object and nothing else." in prompt
+    assert "=== CLEANED LINE-NUMBERED SOURCE (1-based; point your line ranges into these) ===" in prompt
+    assert "   1| PUTUSAN" in prompt
+    assert "   2| Nomor 1" in prompt
+    assert span_spec in prompt
 
 
 def test_reasoning_uses_full_budget_and_off_stays_dynamic() -> None:

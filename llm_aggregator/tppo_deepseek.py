@@ -19,6 +19,8 @@ def _configure() -> None:
     anak_deepseek.DEFAULT_SCHEMA_GUIDE = Path("LLM-aggregator/Putusan-schema.md")
     anak_deepseek.PROGRAM_NAME = "tppo-deepseek-aggregate"
     anak_deepseek.CORPUS_LABEL = "Putusan TPPO"
+    anak_deepseek.CORPUS_NAME = "TPPO"
+    anak_deepseek.FORMAT_GUIDE_NAME = "the TPPO Format PDF"
 
 
 def build_parser():
