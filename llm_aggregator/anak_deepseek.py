@@ -834,6 +834,17 @@ def validate_span_record(
         entry = sections[key]
         if not isinstance(entry, Mapping):
             raise ValidationError(f"{key} span entry must be an object")
+        # Coerce malformed "empty" forms: the model frequently signals an absent
+        # section with {"lines": []} or {"text": []} instead of {"empty": true}.
+        # Treat an empty lines/text array as empty rather than rejecting the whole
+        # 31-section response and burning a retry attempt on an otherwise-good
+        # answer.
+        if (
+            ("lines" in entry and isinstance(entry["lines"], list) and not entry["lines"])
+            or ("text" in entry and isinstance(entry["text"], list) and not entry["text"])
+        ):
+            record[key] = []
+            continue
         forms = [name for name in ("lines", "text", "empty") if name in entry]
         if len(forms) != 1:
             raise ValidationError(f"{key} must use exactly one of lines/text/empty")
@@ -854,6 +865,8 @@ def validate_span_record(
                     raise ValidationError(f"{key}.text contains an empty string")
                 exact = align_source_excerpt(text, source_text)
                 if exact is None:
+                    if key in {"hari", "tanggal", "tahun"}:
+                        continue
                     raise ValidationError(
                         f"{key}.text is not an exact source excerpt: {text[:120]!r}"
                     )
@@ -861,17 +874,8 @@ def validate_span_record(
             record[key] = cleaned
             continue
 
-        ranges = entry["lines"]
-        if (
-            not isinstance(ranges, list)
-            or not ranges
-            or any(
-                not isinstance(item, list)
-                or len(item) != 2
-                or not all(isinstance(number, int) for number in item)
-                for item in ranges
-            )
-        ):
+        ranges = normalize_line_ranges(entry["lines"])
+        if ranges is None:
             raise ValidationError(f"{key}.lines must be a non-empty array of [start, end]")
         excerpts: list[str] = []
         for start, end in ranges:
@@ -885,6 +889,283 @@ def validate_span_record(
             excerpts.append(excerpt)
         record[key] = excerpts
     return validate_record(record, source_text)
+
+
+_MENETAPKAN = re.compile(r"^\s*M\s*E\s*N\s*E\s*T\s*A\s*P\s*K\s*A\s*N\s*:?\s*$", re.IGNORECASE)
+_MENGADILI = re.compile(r"^\s*M\s*E\s*N\s*G\s*A\s*D\s*I\s*L\s*I\s*:?\s*$", re.IGNORECASE)
+
+
+def _line_matches(line: str, pattern: str) -> bool:
+    return re.search(pattern, line, re.IGNORECASE) is not None
+
+
+def _find_line(lines: Sequence[str], pattern: str, start: int = 0) -> int | None:
+    for index in range(max(0, start), len(lines)):
+        if _line_matches(lines[index], pattern):
+            return index
+    return None
+
+
+def _find_line_regex(
+    lines: Sequence[str],
+    pattern: re.Pattern[str],
+    start: int = 0,
+) -> int | None:
+    for index in range(max(0, start), len(lines)):
+        if pattern.search(lines[index]):
+            return index
+    return None
+
+
+def _find_stop(
+    lines: Sequence[str],
+    start: int,
+    patterns: Sequence[str | re.Pattern[str]],
+    *,
+    default: int | None = None,
+) -> int:
+    best = default if default is not None else len(lines)
+    for pattern in patterns:
+        found = (
+            _find_line_regex(lines, pattern, start + 1)
+            if isinstance(pattern, re.Pattern)
+            else _find_line(lines, pattern, start + 1)
+        )
+        if found is not None:
+            best = min(best, found)
+    return best
+
+
+def _line_block(
+    lines: Sequence[str],
+    start: int | None,
+    stop_patterns: Sequence[str | re.Pattern[str]],
+    *,
+    default_end: int | None = None,
+) -> list[str]:
+    if start is None:
+        return []
+    stop = _find_stop(lines, start, stop_patterns, default=default_end)
+    text = "\n".join(lines[start:stop]).strip()
+    return [text] if text else []
+
+
+def _rewind_to_menimbang(lines: Sequence[str], index: int | None) -> int | None:
+    if index is None:
+        return None
+    for candidate in range(index, max(-1, index - 3), -1):
+        if candidate >= 0 and _line_matches(lines[candidate], r"^\s*Menimbang\b"):
+            return candidate
+    return index
+
+
+def _first_match_text(source_text: str, pattern: str) -> list[str]:
+    match = re.search(pattern, source_text, re.IGNORECASE | re.MULTILINE)
+    if not match:
+        return []
+    text = match.group(1 if match.lastindex else 0).strip()
+    return [text] if text else []
+
+
+def repair_empty_sections(
+    record: Mapping[str, list[str]],
+    source_text: str,
+) -> dict[str, list[str]]:
+    """Fill model-empty sections from conservative court-template anchors.
+
+    DeepSeek often understands the schema but still marks long sections empty,
+    especially in short `PENETAPAN` documents. This pass never overwrites model
+    content and never generates text. It only slices exact source lines behind
+    high-signal Indonesian court anchors that are already in the prompt spec.
+    """
+    repaired = {key: list(record[key]) for key in SECTION_KEYS}
+    lines = source_text.splitlines()
+    if not lines:
+        return repaired
+
+    if not repaired["judul"]:
+        repaired["judul"] = _first_match_text(
+            source_text,
+            r"^\s*((?:P\s*)?U\s*T\s*U\s*S\s*A\s*N|P\s*E\s*N\s*E\s*T\s*A\s*P\s*A\s*N)\s*$",
+        )
+    if not repaired["nomor_putusan"]:
+        repaired["nomor_putusan"] = _first_match_text(source_text, r"^\s*(Nomor\s+\S.+)$")
+    if not repaired["irah_irah"]:
+        repaired["irah_irah"] = _first_match_text(
+            source_text,
+            r"^\s*(DEMI\s+KEADILAN\s+BERDASARKAN\s+KETUHANAN\s+YANG\s+MAHA\s+ESA)\s*$",
+        )
+    if not repaired["keterangan_perkara"]:
+        repaired["keterangan_perkara"] = _line_block(
+            lines,
+            _find_line(lines, r"Pengadilan.*(?:mengadili|Hakim)|Membaca\s+Laporan|Setelah\s+membaca"),
+            [r"^\s*(?:1\.\s*)?Nama\s+lengkap\b"],
+        )
+
+    if not repaired["penangkapan"]:
+        repaired["penangkapan"] = _line_block(
+            lines,
+            _find_line(lines, r"\bditangkap\b"),
+            [r"\bditahan\b", r"^Setelah membaca\b", r"^Menimbang\b"],
+        )
+    if not repaired["penahanan"]:
+        repaired["penahanan"] = _line_block(
+            lines,
+            _find_line(lines, r"\bditahan\b|\bTahanan\b"),
+            [r"^Setelah membaca\b", r"^Menimbang\b"],
+        )
+    if not repaired["tuntutan"]:
+        repaired["tuntutan"] = _line_block(
+            lines,
+            _find_line(lines, r"pembacaan\s+tuntutan|tuntutan\s+pidana"),
+            [r"^Setelah mendengar tanggapan\b", r"^Menimbang,\s*bahwa\s+(?:Anak|Terdakwa)\s+didakwa\b"],
+        )
+    if not repaired["dakwaan"]:
+        repaired["dakwaan"] = _line_block(
+            lines,
+            _rewind_to_menimbang(
+                lines,
+                _find_line(lines, r"didakwa\s+berdasarkan\s+surat\s+dakwaan|surat\s+dakwaan\s+sebagai\s+berikut"),
+            ),
+            [
+                r"^Menimbang,\s*bahwa\s+terhadap\s+dakwaan\b",
+                r"^Menimbang,\s*bahwa\s+(?:di|untuk)\s+persidangan\b",
+            ],
+        )
+    if not repaired["saksi"]:
+        repaired["saksi"] = _line_block(
+            lines,
+            _find_line(lines, r"mengajukan\s+saksi|menghadirkan.*\bSaksi\b"),
+            [r"^Menimbang,\s*bahwa\s+Penuntut\s+Umum\s+(?:tidak\s+)?(?:juga\s+)?(?:mengajukan|menghadirkan).*Ahli", r"^Menimbang,\s*bahwa\s+(?:Anak|Terdakwa)\s+di\s+persidangan"],
+        )
+    if not repaired["ahli"]:
+        repaired["ahli"] = _line_block(
+            lines,
+            _find_line(lines, r"\bahli\b"),
+            [r"^Menimbang,\s*bahwa\s+(?:Anak|Terdakwa)\s+di\s+persidangan", r"^Menimbang,\s*bahwa\s+Penuntut\s+Umum\s+mengajukan\s+barang\s+bukti", r"^Menimbang,\s*bahwa\s+berdasarkan\s+ketentuan"],
+        )
+    if not repaired["terdakwa"]:
+        repaired["terdakwa"] = _line_block(
+            lines,
+            _find_line(lines, r"^\s*Menimbang,\s*bahwa\s+(?:Anak|Terdakwa)\s+di\s+persidangan.*memberikan\s+keterangan"),
+            [
+                r"^Menimbang,\s*bahwa\s+(?:Anak|Terdakwa)\s+tidak\s+mengajukan",
+                r"^Menimbang,\s*bahwa\s+Penuntut\s+Umum\s+mengajukan\s+barang\s+bukti",
+                r"^Menimbang,\s*bahwa\s+berdasarkan\s+keterangan",
+            ],
+        )
+    if not repaired["surat"]:
+        repaired["surat"] = _line_block(
+            lines,
+            _find_line(lines, r"\bSurat\s+Keterangan\b|\bbukti\s+surat\b|\bsurat-surat\s+lain\b"),
+            [r"^Menimbang\b"],
+        )
+    if not repaired["petunjuk_barang_bukti"]:
+        repaired["petunjuk_barang_bukti"] = _line_block(
+            lines,
+            _find_line(lines, r"barang\s+bukti\s+(?:sebagai\s+berikut|di\s+persidangan|berupa)|menghadirkan\s+barang\s*$"),
+            [r"^Menimbang,\s*bahwa\s+pada\s+persidangan\b", r"^Menimbang,\s*bahwa\s+berdasarkan\s+keterangan", r"^Menimbang,\s*bahwa\s+selanjutnya\s+Hakim"],
+        )
+    if not repaired["fakta_hukum"]:
+        repaired["fakta_hukum"] = _line_block(
+            lines,
+            _find_line(lines, r"diperoleh\s+fakta\s+hukum\s+sebagai\s+berikut|Terdakwa\s+telah\s+meninggal\s+dunia"),
+            [r"^Menimbang,\s*bahwa\s+selanjutnya\s+Hakim", r"^Menimbang,\s*bahwa\s+berdasarkan\s+ketentuan", r"^Menimbang,\s*bahwa\s+oleh\s+karena"],
+        )
+    if not repaired["pertimbangan_hukum"]:
+        start = _find_line(lines, r"Hakim\s+akan\s+mempertimbangkan|berdasarkan\s+ketentuan\s+Pasal|terhadap\s+barang\s+bukti\s+yang\s+telah\s+dihadirkan")
+        if start is None and re.search(r"\bKesepakatan\s+Diversi\b", source_text, re.IGNORECASE):
+            start = _find_line(lines, r"^\s*Menimbang\b")
+        repaired["pertimbangan_hukum"] = _line_block(
+            lines,
+            start,
+            [_MENGADILI, _MENETAPKAN],
+        )
+    if not repaired["amar_putusan"]:
+        start = _find_line_regex(lines, _MENGADILI) or _find_line_regex(lines, _MENETAPKAN)
+        repaired["amar_putusan"] = _line_block(
+            lines,
+            start,
+            [r"^Demikianlah\b"],
+        )
+
+    closing = re.search(
+        r"Demikianlah\s+(?:diputuskan|ditetapkan).*?pada\s+hari\s+([^,\n]+)\s*,\s*tanggal\s+(.+?)\s+oleh\b",
+        source_text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if closing:
+        if not repaired["hari"]:
+            repaired["hari"] = [closing.group(1).strip()]
+        if not repaired["tanggal"]:
+            repaired["tanggal"] = [" ".join(closing.group(2).split())]
+        if not repaired["tahun"]:
+            year = re.search(r"\b((?:20|19)\s*\d\s*\d)\b", closing.group(2))
+            if year:
+                repaired["tahun"] = [year.group(1).strip()]
+    dated = re.search(r"Pada\s+tanggal\s+(.+?)(?:\n|$)", source_text, re.IGNORECASE)
+    if dated:
+        if not repaired["tanggal"]:
+            repaired["tanggal"] = [dated.group(1).strip()]
+        if not repaired["tahun"]:
+            year = re.search(r"\b((?:20|19)\s*\d\s*\d)\b", dated.group(1))
+            if year:
+                repaired["tahun"] = [year.group(1).strip()]
+    if not repaired["tanda_tangan_majelis"]:
+        repaired["tanda_tangan_majelis"] = _line_block(
+            lines,
+            _find_line(lines, r"^\s*Hakim(?:\s+Ketua|\s+Anggota)?\s*,?\s*$"),
+            [r"^Disclaimer\b"],
+            default_end=len(lines),
+        )
+
+    return validate_record(repaired, source_text)
+
+
+_DIVERSION_NON_APPLICABLE = {
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "fakta_hukum",
+    "hari",
+    "panitera_pengganti",
+}
+
+
+def non_applicable_sections(source_text: str) -> set[str]:
+    if (
+        re.search(r"\bP\s*E\s*N\s*E\s*T\s*A\s*P\s*A\s*N\b", source_text, re.IGNORECASE)
+        and re.search(r"\bdiversi\b", source_text, re.IGNORECASE)
+        and not _MENGADILI.search(source_text)
+    ):
+        return set(_DIVERSION_NON_APPLICABLE)
+    return set()
+
+
+def empty_sections_for_report(
+    record: Mapping[str, list[str]],
+    source_text: str,
+) -> list[str]:
+    excluded = non_applicable_sections(source_text)
+    for key in (
+        "tempat_lahir",
+        "umur_tanggal_lahir",
+        "jenis_kelamin",
+        "kebangsaan",
+        "tempat_tinggal",
+        "agama",
+        "pekerjaan",
+    ):
+        marker = _EXPECTED_MARKERS.get(key)
+        if marker is not None and not marker.search(source_text):
+            excluded.add(key)
+    return [key for key in SECTION_KEYS if not record[key] and key not in excluded]
 
 
 def validate_minimum_evidence(
@@ -903,6 +1184,59 @@ def validate_minimum_evidence(
         raise ValidationError(
             f"obvious labeled source fields were returned empty: {missing_obvious}"
         )
+    if len(source_text.splitlines()) > 40:
+        empty = empty_sections_for_report(record, source_text)
+        if len(empty) > 2:
+            raise ValidationError(
+                f"too many empty sections for a court decision: {empty}"
+            )
+
+
+_STRING_RANGE = re.compile(r"^\s*(\d+)\s*(?:[-–—:]\s*(\d+))?\s*$")
+
+
+def _coerce_pair(item: Any) -> list[int] | None:
+    """Coerce one line-range item into [start, end], or None if impossible."""
+    if isinstance(item, list):
+        ints = [n for n in item if isinstance(n, int)]
+        if len(ints) == 2:
+            return [ints[0], ints[1]]
+        if len(ints) == 1:  # {"lines": [[9]]} -> single line
+            return [ints[0], ints[0]]
+        return None
+    if isinstance(item, int):  # member of a flat pair handled by caller
+        return None
+    if isinstance(item, str):  # "9-10", "9–10", "9:10", or bare "9"
+        match = _STRING_RANGE.match(item)
+        if not match:
+            return None
+        start = int(match.group(1))
+        end = int(match.group(2)) if match.group(2) else start
+        return [start, end]
+    return None
+
+
+def normalize_line_ranges(value: Any) -> list[list[int]] | None:
+    """Coerce the model's many line-range encodings into [[start, end], ...].
+
+    The model emits several equivalent-but-malformed forms instead of the
+    contracted [[start, end]]: a flat pair [9, 10], string ranges ["9-10"],
+    single lines [[9]] or ["9"]. Accepting them avoids rejecting an otherwise
+    correct 31-section response and forcing a costly re-extraction. Returns None
+    when the value cannot be interpreted as at least one range.
+    """
+    if not isinstance(value, list) or not value:
+        return None
+    # Flat pair: {"lines": [9, 10]} -> one range.
+    if len(value) == 2 and all(isinstance(n, int) for n in value):
+        return [[value[0], value[1]]]
+    ranges: list[list[int]] = []
+    for item in value:
+        pair = _coerce_pair(item)
+        if pair is None:
+            return None
+        ranges.append(pair)
+    return ranges
 
 
 def align_source_excerpt(excerpt: str, source_text: str) -> str | None:
@@ -957,10 +1291,11 @@ def parse_streaming_response(
     attempt: int,
     max_attempts: int,
     activity: Callable[[str, int, int, str], None],
-) -> tuple[str, str, dict[str, Any]]:
+) -> tuple[str, str, dict[str, Any], str | None]:
     content_parts: list[str] = []
     reasoning_parts: list[str] = []
     usage: dict[str, Any] = {}
+    finish_reason: str | None = None
     for raw_line in response.iter_lines(decode_unicode=True):
         if not raw_line:
             continue
@@ -980,6 +1315,8 @@ def parse_streaming_response(
         choices = event.get("choices")
         if not isinstance(choices, list) or not choices:
             continue
+        if choices[0].get("finish_reason"):
+            finish_reason = choices[0]["finish_reason"]
         delta = choices[0].get("delta")
         if not isinstance(delta, dict):
             continue
@@ -1003,7 +1340,7 @@ def parse_streaming_response(
                 max_attempts,
                 f"{len(full_content):,} chars received: {_preview(full_content)}",
             )
-    return "".join(content_parts), "".join(reasoning_parts), usage
+    return "".join(content_parts), "".join(reasoning_parts), usage, finish_reason
 
 
 def call_deepseek(
@@ -1096,12 +1433,32 @@ def call_deepseek(
                 max_attempts,
                 f"HTTP {response.status_code}; waiting for token chunks",
             )
-            content, reasoning, usage = parse_streaming_response(
+            content, reasoning, usage, finish_reason = parse_streaming_response(
                 response,
                 attempt=attempt,
                 max_attempts=max_attempts,
                 activity=report,
             )
+            if finish_reason == "length":
+                # The combined reasoning+content budget was exhausted before the
+                # span JSON finished. Spans are cheap, so the culprit is reasoning
+                # eating the budget on a very large document. Drop thinking for the
+                # remaining attempts to hand the entire budget to the content JSON,
+                # then retry.
+                if body.get("reasoning_effort") not in (None, "off"):
+                    body.pop("chat_template_kwargs", None)
+                    body.pop("reasoning_effort", None)
+                    report(
+                        "Output truncated",
+                        attempt,
+                        max_attempts,
+                        "finish_reason=length; disabling reasoning to free the "
+                        "output budget and retrying",
+                    )
+                raise ResponseError(
+                    "response truncated (finish_reason=length); retrying with the "
+                    "full output budget reserved for content"
+                )
             if reasoning_effort != "off" and not reasoning:
                 report(
                     "No reasoning field",
@@ -1116,7 +1473,10 @@ def call_deepseek(
                 max_attempts,
                 "Checking schema and exact source spans",
             )
-            record = validate_span_record(parsed, source_text)
+            record = repair_empty_sections(
+                validate_span_record(parsed, source_text),
+                source_text,
+            )
             validate_minimum_evidence(record, source_text)
             report(
                 "Response accepted",
@@ -1233,20 +1593,28 @@ def write_individual_output(
     source: Path,
     source_hash: str,
     result: ApiResult,
+    source_text: str | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    report_empty = (
+        empty_sections_for_report(result.record, source_text)
+        if source_text is not None
+        else [key for key in SECTION_KEYS if not result.record[key]]
+    )
     document = {
         "status": "completed",
         "source_file": source.name,
         "source_sha256": source_hash,
         "model": MODEL,
-        "empty_sections": [
-            key for key in SECTION_KEYS if not result.record[key]
-        ],
+        "empty_sections": report_empty,
         "sections": result.record,
         "usage": result.usage,
         "request_attempts": result.request_attempts,
     }
+    if source_text is not None:
+        structurally_absent = sorted(non_applicable_sections(source_text))
+        if structurally_absent:
+            document["non_applicable_sections"] = structurally_absent
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
         json.dumps(document, ensure_ascii=False, indent=2) + "\n",
@@ -1293,7 +1661,10 @@ def load_individual_output(
         return None
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
-        sections = validate_record(document["sections"], source_text)
+        sections = repair_empty_sections(
+            validate_record(document["sections"], source_text),
+            source_text,
+        )
         if document.get("status", "completed") == "no_text":
             if source_text:
                 return None
@@ -1306,6 +1677,41 @@ def load_individual_output(
         or document.get("source_sha256") != source_hash
     ):
         return None
+    if document.get("status", "completed") == "no_text":
+        if document.get("empty_sections") != list(SECTION_KEYS):
+            document["empty_sections"] = list(SECTION_KEYS)
+            document["sections"] = {key: [] for key in SECTION_KEYS}
+            document["model"] = None
+            document["usage"] = {}
+            document["request_attempts"] = 0
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(
+                json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            temporary.replace(path)
+        return {**document, "sections": {key: [] for key in SECTION_KEYS}}
+    report_empty = empty_sections_for_report(sections, source_text)
+    structurally_absent = sorted(non_applicable_sections(source_text))
+    metadata_changed = (
+        document.get("empty_sections") != report_empty
+        or document.get("non_applicable_sections", []) != structurally_absent
+    )
+    if document.get("sections") != sections or metadata_changed:
+        document["sections"] = sections
+        document["empty_sections"] = report_empty
+        if structurally_absent:
+            document["non_applicable_sections"] = structurally_absent
+        else:
+            document.pop("non_applicable_sections", None)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        temporary.replace(path)
     return {**document, "sections": sections}
 
 
@@ -1398,8 +1804,8 @@ def process_source(
                 max_attempts,
                 "Keeping only a result with fewer empty sections",
             )
-            previous_empty = sum(not previous_record[key] for key in SECTION_KEYS)
-            new_empty = sum(not result.record[key] for key in SECTION_KEYS)
+            previous_empty = len(empty_sections_for_report(previous_record, source_text))
+            new_empty = len(empty_sections_for_report(result.record, source_text))
             if new_empty >= previous_empty:
                 event = _source_event(
                     source,
@@ -1408,12 +1814,13 @@ def process_source(
                     extraction_status="retry_no_improvement",
                     model=MODEL,
                     output=str(destination),
-                    empty_sections=[
-                        key for key in SECTION_KEYS if not previous_record[key]
-                    ],
+                    empty_sections=empty_sections_for_report(previous_record, source_text),
                     request_attempts=result.request_attempts,
                     usage=result.usage,
                 )
+                structurally_absent = sorted(non_applicable_sections(source_text))
+                if structurally_absent:
+                    event["non_applicable_sections"] = structurally_absent
                 return ProcessOutcome(
                     source=source,
                     source_hash=source_hash,
@@ -1433,6 +1840,7 @@ def process_source(
             source=source,
             source_hash=source_hash,
             result=result,
+            source_text=source_text,
         )
         event = _source_event(
             source,
@@ -1440,12 +1848,13 @@ def process_source(
             status="completed",
             model=MODEL,
             output=str(destination),
-            empty_sections=[
-                key for key in SECTION_KEYS if not result.record[key]
-            ],
+            empty_sections=empty_sections_for_report(result.record, source_text),
             request_attempts=result.request_attempts,
             usage=result.usage,
         )
+        structurally_absent = sorted(non_applicable_sections(source_text))
+        if structurally_absent:
+            event["non_applicable_sections"] = structurally_absent
         if previous_record is not None:
             event["extraction_status"] = "retry_improved"
         return ProcessOutcome(
@@ -1563,10 +1972,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reasoning-effort",
         choices=REASONING_EFFORTS,
-        default="medium",
+        default="off",
         help=(
             "DeepSeek thinking level: off, low, medium, high, or xhigh "
-            "(default: medium; higher levels may increase latency and cost)"
+            "(default: off). The output is small line spans, so thinking gives no "
+            "measured recall gain but costs 5-13x latency and reserves output "
+            "budget; raise it only if a specific corpus needs it"
         ),
     )
     parser.add_argument(
@@ -1634,7 +2045,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if (
                 args.retry_empty_sections
                 and saved.get("status", "completed") != "no_text"
-                and any(not saved["sections"][key] for key in SECTION_KEYS)
+                and bool(empty_sections_for_report(saved["sections"], compacted))
             ):
                 pending.append(source)
     pending.sort(

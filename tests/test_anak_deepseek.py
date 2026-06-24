@@ -24,8 +24,10 @@ from llm_aggregator.anak_deepseek import (
     output_path,
     parse_model_json,
     sha256_text,
+    empty_sections_for_report,
     validate_minimum_evidence,
     validate_record,
+    repair_empty_sections,
     write_individual_output,
     write_no_text_output,
 )
@@ -35,9 +37,9 @@ def empty_record() -> dict[str, list[str]]:
     return {key: [] for key in SECTION_KEYS}
 
 
-def test_cli_defaults_to_medium_reasoning() -> None:
+def test_cli_defaults_to_reasoning_off() -> None:
     args = anak_deepseek.build_parser().parse_args([])
-    assert args.reasoning_effort == "medium"
+    assert args.reasoning_effort == "off"
     assert args.workers == 8
     assert args.network_failure_threshold == 3
     assert args.network_cooldown == 60
@@ -100,10 +102,12 @@ class FakeResponse:
         *,
         status_code: int = 200,
         text: str = "",
+        finish_reason: str | None = None,
     ) -> None:
         self.payload = payload
         self.status_code = status_code
         self.text = text
+        self.finish_reason = finish_reason
 
     def json(self) -> dict[str, Any]:
         return self.payload
@@ -115,8 +119,11 @@ class FakeResponse:
             .get("content", "")
         )
         usage = self.payload.get("usage", {})
+        choice: dict[str, Any] = {"delta": {"content": content}}
+        if self.finish_reason is not None:
+            choice["finish_reason"] = self.finish_reason
         event = {
-            "choices": [{"delta": {"content": content}}],
+            "choices": [choice],
             "usage": usage,
         }
         return [f"data: {json.dumps(event)}", "data: [DONE]"]
@@ -199,6 +206,92 @@ def test_minimum_evidence_rejects_empty_200_and_missing_labeled_fields() -> None
     record["nomor_putusan"] = ["Nomor 1"]
     with pytest.raises(ValidationError, match="nama_lengkap"):
         validate_minimum_evidence(record, source)
+
+
+def test_minimum_evidence_rejects_court_decision_with_many_empty_sections() -> None:
+    source = "\n".join(["PUTUSAN", "Nomor 1", "Nama lengkap: ANAK", *("isi" for _ in range(45))])
+    record = empty_record()
+    record["judul"] = ["PUTUSAN"]
+    record["nomor_putusan"] = ["Nomor 1"]
+    record["nama_lengkap"] = ["ANAK"]
+
+    with pytest.raises(ValidationError, match="too many empty sections"):
+        validate_minimum_evidence(record, source)
+
+
+def test_repair_empty_sections_fills_penetapan_template_anchors() -> None:
+    source = (
+        "P E N E T A P A N\n"
+        "Nomor 98/Pid.Sus/2026/PN Mpw\n"
+        "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA\n"
+        "Terdakwa ditangkap sejak tanggal 18 Oktober 2025 sampai dengan tanggal 19\n"
+        "Oktober 2025;\n"
+        "Terdakwa ditahan dalam Tahanan Rutan oleh:\n"
+        "1. Penyidik sejak tanggal 18 Oktober 2025 sampai dengan tanggal 6 November 2025;\n"
+        "Setelah membaca:\n"
+        "5. Surat Keterangan Kematian Nomor 400 atas nama Abdul Malik;\n"
+        "Menimbang, bahwa Terdakwa diajukan ke persidangan oleh Penuntut\n"
+        "Umum didakwa berdasarkan surat dakwaan sebagai berikut:\n"
+        "Bahwa terdakwa melakukan perbuatan sebagaimana dakwaan;\n"
+        "Menimbang, bahwa di persidangan Penuntut Umum telah menghadirkan\n"
+        "2 (dua) orang Saksi yang memberikan keterangan dibawah sumpah;\n"
+        "Menimbang, bahwa Penuntut Umum juga telah menghadirkan barang\n"
+        "bukti di persidangan berupa 1 (satu) buah Handphone;\n"
+        "Menimbang, bahwa pada persidangan hari Selasa tanggal 21 April 2026\n"
+        "dengan agenda pemeriksaan ahli dari Penuntut Umum, Penuntut Umum\n"
+        "menyatakan tidak dapat menghadirkan Terdakwa dikarenakan Terdakwa telah\n"
+        "meninggal dunia pada tanggal 18 April 2026;\n"
+        "Menimbang, bahwa berdasarkan ketentuan Pasal 132 ayat (1) huruf b\n"
+        "penuntutan terhadap Terdakwa dinyatakan gugur;\n"
+        "Menimbang, bahwa terhadap barang bukti yang telah dihadirkan oleh\n"
+        "Penuntut Umum di persidangan dikembalikan kepada Penuntut Umum;\n"
+        "MENETAPKAN:\n"
+        "1. Menyatakan kewenangan Penuntut Umum gugur;\n"
+        "Demikianlah ditetapkan dalam sidang permusyawaratan Majelis Hakim\n"
+        "Pengadilan Negeri Mempawah, pada hari Selasa, tanggal 21 April 2026 oleh\n"
+        "kami, Rezki Fauzi, S.H., sebagai Hakim Ketua;\n"
+    )
+    record = empty_record()
+
+    repaired = repair_empty_sections(record, source)
+
+    assert repaired["judul"] == ["P E N E T A P A N"]
+    assert repaired["irah_irah"] == [
+        "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ]
+    assert repaired["penangkapan"][0].startswith("Terdakwa ditangkap")
+    assert repaired["penahanan"][0].startswith("Terdakwa ditahan")
+    assert repaired["dakwaan"][0].startswith("Menimbang, bahwa Terdakwa")
+    assert repaired["petunjuk_barang_bukti"][0].startswith("Menimbang, bahwa Penuntut Umum")
+    assert repaired["pertimbangan_hukum"][0].startswith("Menimbang, bahwa berdasarkan")
+    assert repaired["amar_putusan"][0].startswith("MENETAPKAN")
+    assert repaired["tanggal"] == ["21 April 2026"]
+    assert repaired["tahun"] == ["2026"]
+
+
+def test_diversion_penetapan_trial_sections_are_structurally_non_applicable() -> None:
+    source = (
+        "PENETAPAN\n"
+        "Nomor 3/Pen.Div/2026/PN Mrs\n"
+        "Membaca Laporan Pembimbing Kemasyarakatan tentang pelaksanaan\n"
+        "Kesepakatan Diversi dalam perkara Anak:\n"
+        "Nama lengkap : ANAK;\n"
+        "Menimbang, bahwa Kesepakatan Diversi telah selesai dilaksanakan;\n"
+        "MENETAPKAN\n"
+        "1. Menghentikan proses pemeriksaan perkara Anak;\n"
+    )
+    record = empty_record()
+    record["judul"] = ["PENETAPAN"]
+    record["nomor_putusan"] = ["Nomor 3/Pen.Div/2026/PN Mrs"]
+    record["nama_lengkap"] = ["ANAK"]
+
+    reported_empty = empty_sections_for_report(record, source)
+
+    assert "dakwaan" not in reported_empty
+    assert "saksi" not in reported_empty
+    assert "terdakwa" not in reported_empty
+    assert "agama" not in reported_empty
+    assert "irah_irah" in reported_empty
 
 
 def test_parse_model_json_rejects_empty_http_200_content() -> None:
@@ -369,7 +462,7 @@ def test_parse_streaming_response_exposes_reasoning_and_content() -> None:
             ]
 
     activity: list[tuple[str, str]] = []
-    content, reasoning, usage = anak_deepseek.parse_streaming_response(
+    content, reasoning, usage, finish_reason = anak_deepseek.parse_streaming_response(
         StreamResponse(),  # type: ignore[arg-type]
         attempt=1,
         max_attempts=4,
@@ -381,6 +474,7 @@ def test_parse_streaming_response_exposes_reasoning_and_content() -> None:
     assert content == '{"judul":["PUTUSAN"]}'
     assert reasoning == "Checking source labels..."
     assert usage["completion_tokens"] == 5
+    assert finish_reason is None
     assert [stage for stage, _ in activity] == [
         "Model reasoning",
         "Generating JSON",
@@ -414,6 +508,96 @@ def test_call_deepseek_retries_non_verbatim_output() -> None:
 
     assert result.record["judul"] == ["PUTUSAN"]
     assert result.request_attempts == 2
+
+
+def test_validate_span_record_coerces_empty_lines_to_empty_section() -> None:
+    source_text = "PUTUSAN\nNomor 1"
+    sections = {key: {"empty": True} for key in SECTION_KEYS}
+    sections["judul"] = {"text": ["PUTUSAN"]}
+    # The model frequently signals an absent section with an empty array form
+    # instead of {"empty": true}. This must coerce to empty, not reject the whole
+    # 31-section response.
+    sections["penangkapan"] = {"lines": []}
+    sections["surat"] = {"text": []}
+
+    record = anak_deepseek.validate_span_record(
+        {"sections": sections}, source_text
+    )
+
+    assert record["judul"] == ["PUTUSAN"]
+    assert record["penangkapan"] == []
+    assert record["surat"] == []
+
+
+def test_validate_span_record_normalizes_flat_line_pair() -> None:
+    source_text = "PUTUSAN\nNomor 1\nbaris ketiga\nbaris keempat"
+    sections = {key: {"empty": True} for key in SECTION_KEYS}
+    sections["judul"] = {"text": ["PUTUSAN"]}
+    # Common LLM slip: a bare [start, end] pair instead of [[start, end]].
+    sections["dakwaan"] = {"lines": [3, 4]}
+
+    record = anak_deepseek.validate_span_record(
+        {"sections": sections}, source_text
+    )
+
+    assert record["dakwaan"] == ["baris ketiga\nbaris keempat"]
+
+
+def test_validate_span_record_normalizes_string_and_single_line_forms() -> None:
+    source_text = "PUTUSAN\nNomor 1\nbaris ketiga\nbaris keempat"
+    sections = {key: {"empty": True} for key in SECTION_KEYS}
+    sections["judul"] = {"text": ["PUTUSAN"]}
+    # String dash-range and a single-line nested form both seen from the model.
+    sections["dakwaan"] = {"lines": ["3-4"]}
+    sections["nomor_putusan"] = {"lines": [[2]]}
+
+    record = anak_deepseek.validate_span_record(
+        {"sections": sections}, source_text
+    )
+
+    assert record["dakwaan"] == ["baris ketiga\nbaris keempat"]
+    assert record["nomor_putusan"] == ["Nomor 1"]
+
+
+def test_normalize_line_ranges_rejects_garbage() -> None:
+    assert anak_deepseek.normalize_line_ranges([]) is None
+    assert anak_deepseek.normalize_line_ranges("nonsense") is None
+    assert anak_deepseek.normalize_line_ranges([["a", "b"]]) is None
+
+
+def test_call_deepseek_retries_on_truncation_and_disables_reasoning() -> None:
+    valid = empty_record()
+    valid["judul"] = ["PUTUSAN"]
+    truncated = FakeResponse(
+        {
+            "choices": [{"message": {"content": '{"judul":["PUT'}}],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 4096},
+        },
+        finish_reason="length",
+    )
+    session = FakeSession([truncated, completion(json.dumps(valid))])
+
+    result = call_deepseek(
+        session,  # type: ignore[arg-type]
+        api_key="test",
+        source_name="one.txt",
+        source_text="PUTUSAN",
+        project=None,
+        timeout_seconds=1,
+        max_attempts=2,
+        max_output_tokens=32768,
+        base_delay_seconds=0,
+        sleep=lambda _: None,
+        reasoning_effort="medium",
+    )
+
+    assert result.record["judul"] == ["PUTUSAN"]
+    assert result.request_attempts == 2
+    # After a length-truncation, reasoning must be dropped so the full output
+    # budget is reserved for the span JSON on the retry.
+    assert session.last_json is not None
+    assert "reasoning_effort" not in session.last_json
+    assert "chat_template_kwargs" not in session.last_json
 
 
 def test_individual_output_exposes_empty_sections_and_resumes(tmp_path: Path) -> None:

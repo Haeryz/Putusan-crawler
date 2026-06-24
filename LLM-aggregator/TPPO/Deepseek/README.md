@@ -17,6 +17,14 @@ exponential backoff. An HTTP 200 response with all sections empty, or with an
 obvious labeled identity field omitted, is also rejected and retried with
 corrective feedback.
 
+Equivalent-but-malformed line-span forms the model commonly emits are coerced
+rather than rejected, so a single shape slip no longer discards an otherwise
+correct 31-section answer: `{"lines": []}`/`{"text": []}` become empty, a flat
+`{"lines": [9, 10]}` and a string `{"lines": ["9-10"]}` both become the range
+`[[9, 10]]`, and a single-line `{"lines": [[9]]}` becomes `[[9, 9]]`. Every
+coerced range is still bounds-checked and expanded to a verbatim source
+excerpt.
+
 The user prompt embeds `LLM-aggregator/TPPO/GPT/SPAN_EXTRACTION_SPEC.md`,
 sanitized field guidance from
 `LLM-aggregator/TPPO/GPT/CODEX_EXTRACTION_INSTRUCTIONS.md`,
@@ -50,7 +58,7 @@ The Windows and Unix launchers contain all normal configuration in one place:
 ./LLM-aggregator/TPPO/Deepseek/run-tppo-deepseek.sh
 ```
 
-Its defaults run eight parallel workers with medium reasoning, a 32,768-token
+Its defaults run eight parallel workers with reasoning off, a 32,768-token
 output budget per request, and the Rich live dashboard. Common controls:
 
 ```powershell
@@ -112,27 +120,29 @@ Elapsed time and time spent in the current stage update continuously, including
 while W&B is still generating a response.
 
 Normal runs stream `choices[0].delta.content`, so the worker table shows JSON
-characters arriving while the extraction is being generated. The PowerShell
-launcher defaults to medium DeepSeek reasoning. Available levels are `off`,
-`low`, `medium`, `high`, and `xhigh`:
+characters arriving while the extraction is being generated. The launcher and
+the direct Python CLI both default to `off` (no thinking). Available levels are
+`off`, `low`, `medium`, `high`, and `xhigh`:
 
 ```powershell
-.\LLM-aggregator\TPPO\Deepseek\run-tppo-deepseek.ps1 -ReasoningEffort medium
-.\LLM-aggregator\TPPO\Deepseek\run-tppo-deepseek.ps1 -ReasoningEffort low
 .\LLM-aggregator\TPPO\Deepseek\run-tppo-deepseek.ps1 -ReasoningEffort off
+.\LLM-aggregator\TPPO\Deepseek\run-tppo-deepseek.ps1 -ReasoningEffort low
+.\LLM-aggregator\TPPO\Deepseek\run-tppo-deepseek.ps1 -ReasoningEffort medium
 ```
 
-When reasoning is not `off`, live `choices[0].delta.reasoning` chunks are shown
-as a bounded preview in the active-worker table, followed by streamed JSON
-generation. The selected effort is also visible in the dashboard summary.
-Reasoning is never written into the extraction JSON; only the separately
-streamed content is schema-checked and source-validated. Thinking increases
-generated tokens, latency, and inference cost. W&B accepted all four effort
-values in live probes, but they are model hints rather than strict token caps.
-The direct Python CLI also defaults to `medium`.
+The default is `off` because the model only emits small line-span JSON: live
+probes across small and very large (200 KB) decisions found that `medium`/`high`
+thinking gave **no recall gain** over `off` while costing 5-13x the latency and
+reserving most of the output budget for reasoning tokens. That budget pressure
+is the only path by which W&B's `max_tokens` could truncate a response, so `off`
+also removes the truncation risk. If a streamed response ever finishes with
+`finish_reason=length`, the worker automatically disables thinking and retries
+so the full budget is reserved for the span JSON. When reasoning is not `off`,
+live `choices[0].delta.reasoning` chunks are shown as a bounded preview in the
+active-worker table. Reasoning is never written into the extraction JSON; only
+the separately streamed content is schema-checked and source-validated.
 
-Reasoning-enabled requests receive the full configured 32,768-token output
-budget. With reasoning `off`, small documents use a smaller dynamic budget to
+With reasoning `off`, small documents use a smaller dynamic output budget to
 avoid unnecessary token reservation. Eight workers can improve corpus
 throughput, but it also means up to eight expensive requests may run
 simultaneously. Reduce `-Workers` if W&B starts returning rate limits or

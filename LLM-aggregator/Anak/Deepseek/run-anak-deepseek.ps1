@@ -10,7 +10,7 @@ param(
     [int]$NetworkFailureThreshold = 3,
     [int]$NetworkCooldownSeconds = 60,
     [ValidateSet("off", "low", "medium", "high", "xhigh")]
-    [string]$ReasoningEffort = "medium",
+    [string]$ReasoningEffort = "off",
     [switch]$NoTui
 )
 
