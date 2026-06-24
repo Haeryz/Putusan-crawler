@@ -53,6 +53,11 @@ def test_cli_defaults_to_reasoning_off() -> None:
         "NameResolutionError: Failed to resolve api.inference.wandb.ai",
         "socket error: getaddrinfo failed",
         "ProxyError: tunnel connection failed",
+        (
+            "ResponseError: request failed after 1 attempts: retryable HTTP 429: "
+            '{"error":{"code":"rate_limit_exceeded","message":"concurrency limit '
+            'reached for requests: zai-org/GLM-5.2-project limit reached"}}'
+        ),
     ],
 )
 def test_infrastructure_errors_are_identified(error: str) -> None:
@@ -600,6 +605,66 @@ def test_call_deepseek_retries_on_truncation_and_disables_reasoning() -> None:
     assert "chat_template_kwargs" not in session.last_json
 
 
+def test_preflight_model_sends_selected_model_and_project() -> None:
+    class Session:
+        last_headers: dict[str, str] | None = None
+        last_json: dict[str, Any] | None = None
+
+        def post(self, *args: Any, **kwargs: Any) -> FakeResponse:
+            self.last_headers = kwargs["headers"]
+            self.last_json = kwargs["json"]
+            return completion('{"ok":true}')
+
+    session = Session()
+    original_model = anak_deepseek.MODEL
+    try:
+        anak_deepseek.MODEL = "zai-org/GLM-5.2"
+        anak_deepseek.preflight_model(
+            session,  # type: ignore[arg-type]
+            api_key="test",
+            project="entity/project",
+            timeout_seconds=120,
+        )
+    finally:
+        anak_deepseek.MODEL = original_model
+
+    assert session.last_headers is not None
+    assert session.last_headers["OpenAI-Project"] == "entity/project"
+    assert session.last_json is not None
+    assert session.last_json["model"] == "zai-org/GLM-5.2"
+    assert session.last_json["max_tokens"] == 16
+
+
+def test_preflight_model_rejects_provider_concurrency_limit() -> None:
+    class Session:
+        def post(self, *args: Any, **kwargs: Any) -> FakeResponse:
+            return FakeResponse(
+                {
+                    "error": {
+                        "code": "rate_limit_exceeded",
+                        "message": (
+                            "concurrency limit reached for requests: "
+                            "zai-org/GLM-5.2-project limit reached"
+                        ),
+                    }
+                },
+                status_code=429,
+                text=(
+                    '{"error":{"code":"rate_limit_exceeded","message":'
+                    '"concurrency limit reached for requests: '
+                    'zai-org/GLM-5.2-project limit reached"}}'
+                ),
+            )
+
+    with pytest.raises(ResponseError, match="model preflight failed"):
+        anak_deepseek.preflight_model(
+            Session(),  # type: ignore[arg-type]
+            api_key="test",
+            project=None,
+            timeout_seconds=120,
+        )
+
+
 def test_individual_output_exposes_empty_sections_and_resumes(tmp_path: Path) -> None:
     source = tmp_path / "one.txt"
     source.write_text("PUTUSAN", encoding="utf-8")
@@ -744,6 +809,7 @@ def test_main_runs_requests_in_parallel(
 
     monkeypatch.setattr(anak_deepseek, "process_source", fake_process)
     monkeypatch.setattr(anak_deepseek, "resolve_api_key", lambda _: "test")
+    monkeypatch.setattr(anak_deepseek, "preflight_model", lambda *args, **kwargs: None)
 
     exit_code = anak_deepseek.main(
         [
@@ -829,6 +895,7 @@ def test_main_requeues_infrastructure_failure_without_recording_it(
 
     monkeypatch.setattr(anak_deepseek, "process_source", fake_process)
     monkeypatch.setattr(anak_deepseek, "resolve_api_key", lambda _: "test")
+    monkeypatch.setattr(anak_deepseek, "preflight_model", lambda *args, **kwargs: None)
 
     exit_code = anak_deepseek.main(
         [
@@ -855,6 +922,43 @@ def test_main_requeues_infrastructure_failure_without_recording_it(
         for line in state.read_text(encoding="utf-8").splitlines()
     ]
     assert [event["status"] for event in events] == ["completed"]
+
+
+def test_main_preflight_failure_exits_without_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    state = tmp_path / "progress.jsonl"
+    input_dir.mkdir()
+    (input_dir / "one.txt").write_text("PUTUSAN", encoding="utf-8")
+
+    monkeypatch.setattr(anak_deepseek, "resolve_api_key", lambda _: "test")
+
+    def fail_preflight(*args: Any, **kwargs: Any) -> None:
+        raise ResponseError(
+            "model preflight failed with retryable HTTP 429: "
+            "concurrency limit reached"
+        )
+
+    monkeypatch.setattr(anak_deepseek, "preflight_model", fail_preflight)
+
+    exit_code = anak_deepseek.main(
+        [
+            "--input-dir",
+            str(input_dir),
+            "--output-dir",
+            str(output_dir),
+            "--state",
+            str(state),
+            "--no-tui",
+        ]
+    )
+
+    assert exit_code == 75
+    assert not state.exists()
+    assert not output_dir.exists()
 
 
 def test_retry_empty_keeps_existing_output_without_improvement(

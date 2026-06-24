@@ -37,7 +37,8 @@ if ($Action -eq "Resume") {
 }
 
 $PythonArguments = @(
-    "-m", "llm_aggregator.anak_deepseek",
+    "-m", "llm_aggregator.
+    anak_deepseek",
     "--input-dir", $InputDir,
     "--output-dir", $OutputDir,
     "--state", $StateFile,

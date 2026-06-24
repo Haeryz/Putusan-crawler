@@ -347,6 +347,10 @@ INFRASTRUCTURE_ERROR_MARKERS = (
     "Connection reset",
     "Connection aborted",
     "ProxyError",
+    "retryable HTTP 429",
+    "rate_limit_exceeded",
+    "concurrency limit reached",
+    "project limit reached",
 )
 
 
@@ -1539,6 +1543,41 @@ def call_deepseek(
     )
 
 
+def preflight_model(
+    session: requests.Session,
+    *,
+    api_key: str,
+    project: str | None,
+    timeout_seconds: float,
+) -> None:
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    if project:
+        headers["OpenAI-Project"] = project
+    response = session.post(
+        API_URL,
+        headers=headers,
+        json={
+            "model": MODEL,
+            "messages": [{"role": "user", "content": "Return ok."}],
+            "max_tokens": 16,
+        },
+        timeout=min(timeout_seconds, 60.0),
+    )
+    if response.status_code == 429 or response.status_code >= 500:
+        raise ResponseError(
+            f"model preflight failed with retryable HTTP "
+            f"{response.status_code}: {response.text[:300]}"
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"model preflight failed with HTTP "
+            f"{response.status_code}: {response.text[:500]}"
+        )
+
+
 def append_state(path: Path, event: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8", newline="\n") as stream:
@@ -1986,6 +2025,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="discover and report work without making API requests",
     )
+    parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help=(
+            "skip the tiny model availability check before starting extraction "
+            "requests"
+        ),
+    )
     return parser
 
 
@@ -2075,6 +2122,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    if not args.skip_preflight:
+        session = requests.Session()
+        try:
+            preflight_model(
+                session,
+                api_key=api_key,
+                project=args.project,
+                timeout_seconds=args.timeout,
+            )
+        except Exception as exc:
+            print(
+                f"Model preflight failed for {MODEL}: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            print(
+                "No extraction requests were started. Use --skip-preflight to "
+                "bypass this check.",
+                file=sys.stderr,
+            )
+            return 75
+        finally:
+            session.close()
 
     processed = 0
     failed = 0

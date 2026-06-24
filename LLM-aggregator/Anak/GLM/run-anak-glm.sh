@@ -5,15 +5,20 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
 ACTION="Run"
-WORKERS=8
+# GLM-5.2 enforces a far lower W&B project-level concurrency cap than DeepSeek
+# (~1 in-flight request). The DeepSeek default of 8 workers makes every request
+# fail with HTTP 429 "concurrency limit reached ... GLM-5.2-project limit
+# reached" and the run livelocks. Keep WORKERS=1 for GLM unless W&B grants more.
+WORKERS=1
 MAX_FILES=0
 TIMEOUT_SECONDS=1200
-MAX_ATTEMPTS=2
+MAX_ATTEMPTS=4
 MAX_OUTPUT_TOKENS=32768
 NETWORK_FAILURE_THRESHOLD=3
 NETWORK_COOLDOWN_SECONDS=60
 REASONING_EFFORT="off"
 NO_TUI=0
+SKIP_PREFLIGHT=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -31,6 +36,7 @@ while [ "$#" -gt 0 ]; do
     --network-cooldown) NETWORK_COOLDOWN_SECONDS="$2"; shift 2 ;;
     --reasoning-effort) REASONING_EFFORT="$2"; shift 2 ;;
     --no-tui) NO_TUI=1; shift ;;
+    --skip-preflight) SKIP_PREFLIGHT=1; shift ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -76,6 +82,7 @@ ARGS=(
 [ "$ACTION" = "RetryEmpty" ] && ARGS+=(--retry-empty-sections)
 [ "$MAX_FILES" -gt 0 ] && ARGS+=(--max-files "$MAX_FILES")
 [ "$NO_TUI" -eq 1 ] && ARGS+=(--no-tui)
+[ "$SKIP_PREFLIGHT" -eq 1 ] && ARGS+=(--skip-preflight)
 
 echo "Action=$ACTION Workers=$WORKERS MaxFiles=$MAX_FILES ReasoningEffort=$REASONING_EFFORT Model=zai-org/GLM-5.2"
 if [ -x ".venv/bin/python" ]; then

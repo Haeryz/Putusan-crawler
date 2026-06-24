@@ -1,17 +1,23 @@
 param(
     [ValidateSet("Run", "Status", "Pause", "Resume", "RetryEmpty")]
     [string]$Action = "Run",
+    # GLM-5.2 enforces a far lower W&B project-level concurrency cap than
+    # DeepSeek (~1 in-flight request). Running the DeepSeek default of 8 workers
+    # makes every request fail with HTTP 429 "concurrency limit reached for
+    # requests: zai-org/GLM-5.2-project limit reached" and the run livelocks.
+    # Keep this at 1 for GLM; raise only if W&B grants more GLM concurrency.
     [ValidateRange(1, 16)]
-    [int]$Workers = 8,
+    [int]$Workers = 1,
     [int]$MaxFiles = 0,
     [int]$TimeoutSeconds = 1200,
-    [int]$MaxAttempts = 2,
+    [int]$MaxAttempts = 4,
     [int]$MaxOutputTokens = 32768,
     [int]$NetworkFailureThreshold = 3,
     [int]$NetworkCooldownSeconds = 60,
     [ValidateSet("off", "low", "medium", "high", "xhigh")]
     [string]$ReasoningEffort = "off",
-    [switch]$NoTui
+    [switch]$NoTui,
+    [switch]$SkipPreflight
 )
 
 $ErrorActionPreference = "Stop"
@@ -64,6 +70,10 @@ if ($MaxFiles -gt 0) {
 
 if ($NoTui) {
     $PythonArguments += "--no-tui"
+}
+
+if ($SkipPreflight) {
+    $PythonArguments += "--skip-preflight"
 }
 
 $PythonArguments += @("--reasoning-effort", $ReasoningEffort)
