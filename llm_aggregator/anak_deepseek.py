@@ -31,6 +31,7 @@ from rich.progress import (
 from rich.table import Table
 
 MODEL = "deepseek-ai/DeepSeek-V4-Pro"
+MODEL_LABEL = "DeepSeek"
 API_URL = "https://api.inference.wandb.ai/v1/chat/completions"
 REASONING_EFFORTS = ("off", "low", "medium", "high", "xhigh")
 DEFAULT_MAX_OUTPUT_TOKENS = 32768
@@ -600,7 +601,7 @@ class RunDashboard:
         else:
             recent.add_row("[dim]Starting[/]", "")
         return Group(
-            Panel(summary, title=f"DeepSeek {CORPUS_LABEL}"),
+            Panel(summary, title=f"{MODEL_LABEL} {CORPUS_LABEL}"),
             self.progress,
             active,
             recent,
@@ -973,7 +974,7 @@ def repair_empty_sections(
 ) -> dict[str, list[str]]:
     """Fill model-empty sections from conservative court-template anchors.
 
-    DeepSeek often understands the schema but still marks long sections empty,
+    The model often understands the schema but still marks long sections empty,
     especially in short `PENETAPAN` documents. This pass never overwrites model
     content and never generates text. It only slices exact source lines behind
     high-signal Indonesian court anchors that are already in the prompt spec.
@@ -1888,7 +1889,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROGRAM_NAME,
         description=(
-            f"Extract verbatim {CORPUS_LABEL} sections with DeepSeek through W&B "
+            f"Extract verbatim {CORPUS_LABEL} sections with {MODEL_LABEL} through W&B "
             "Inference, with JSONL checkpoints and individual JSON outputs."
         ),
     )
@@ -1974,7 +1975,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=REASONING_EFFORTS,
         default="off",
         help=(
-            "DeepSeek thinking level: off, low, medium, high, or xhigh "
+            f"{MODEL_LABEL} thinking level: off, low, medium, high, or xhigh "
             "(default: off). The output is small line spans, so thinking gives no "
             "measured recall gain but costs 5-13x latency and reserves output "
             "budget; raise it only if a specific corpus needs it"
@@ -2084,7 +2085,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     network_paused_until = 0.0
     executor = ThreadPoolExecutor(
         max_workers=args.workers,
-        thread_name_prefix="deepseek",
+        thread_name_prefix=PROGRAM_NAME,
     )
 
     dashboard = RunDashboard(

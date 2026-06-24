@@ -8,13 +8,20 @@ import llm_aggregator.tppo_deepseek as tppo_deepseek
 
 def test_tppo_wrapper_uses_tppo_paths_and_shared_prompt(monkeypatch) -> None:
     for name in (
+        "MODEL",
+        "MODEL_LABEL",
         "DEFAULT_INPUT",
         "DEFAULT_OUTPUT_DIR",
         "DEFAULT_STATE",
         "DEFAULT_ENV",
         "DEFAULT_PAUSE_FILE",
+        "DEFAULT_SPAN_SPEC",
+        "DEFAULT_EXTRACTION_INSTRUCTIONS",
+        "DEFAULT_SCHEMA_GUIDE",
         "PROGRAM_NAME",
         "CORPUS_LABEL",
+        "CORPUS_NAME",
+        "FORMAT_GUIDE_NAME",
     ):
         monkeypatch.setattr(anak_deepseek, name, getattr(anak_deepseek, name))
 
