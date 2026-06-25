@@ -75,7 +75,11 @@ const sectionAliases: Record<string, string[]> = {
 
 const toDisplayText = (value: JsonValue | undefined): string => {
 	if (value === undefined || value === null) return '';
-	if (Array.isArray(value)) return value.map((item) => toDisplayText(item)).filter(Boolean).join('\n\n');
+	if (Array.isArray(value))
+		return value
+			.map((item) => toDisplayText(item))
+			.filter(Boolean)
+			.join('\n\n');
 	if (typeof value === 'object') return JSON.stringify(value, null, 2);
 	return String(value);
 };
@@ -101,9 +105,19 @@ const getSectionText = (sections: JsonObject, key: string): string => {
 	return '';
 };
 
-const normalizeRow = (json: JsonObject, fileName: string, category: string, model: string): DecisionRow => {
-	const sections = typeof json.sections === 'object' && json.sections !== null ? (json.sections as JsonObject) : {};
-	const fields = Object.fromEntries(rowColumns.map((column) => [column.key, getSectionText(sections, column.key)]));
+const normalizeRow = (
+	json: JsonObject,
+	fileName: string,
+	category: string,
+	model: string
+): DecisionRow => {
+	const sections =
+		typeof json.sections === 'object' && json.sections !== null
+			? (json.sections as JsonObject)
+			: {};
+	const fields = Object.fromEntries(
+		rowColumns.map((column) => [column.key, getSectionText(sections, column.key)])
+	);
 	const sourceFile = toDisplayText(json.source_file) || fileName.replace(/\.json$/i, '.txt');
 	const emptySections = Array.isArray(json.empty_sections)
 		? json.empty_sections.map((section) => String(section))
@@ -155,7 +169,7 @@ const readModelRows = async (
 	for (const filePath of jsonFiles) {
 		const content = await readFile(filePath, 'utf8');
 		summary.bytes += Buffer.byteLength(content, 'utf8');
-		const json = JSON.parse(content) as JsonObject;
+		const json = JSON.parse(content.replace(/^\uFEFF/, '')) as JsonObject;
 		rows.push(normalizeRow(json, path.basename(filePath), category, model));
 	}
 
@@ -173,7 +187,10 @@ const readCsvReference = async (csvPath: string) => {
 		return {
 			path: csvPath,
 			rowCount: Math.max(0, rowCount),
-			columns: header.split(';').map((column) => column.trim()).filter(Boolean)
+			columns: header
+				.split(';')
+				.map((column) => column.trim())
+				.filter(Boolean)
 		};
 	} catch {
 		return {
