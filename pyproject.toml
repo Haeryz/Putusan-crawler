@@ -24,6 +24,8 @@ anak-deepseek-aggregate = "llm_aggregator.anak_deepseek:main"
 tppo-deepseek-aggregate = "llm_aggregator.tppo_deepseek:main"
 anak-glm-aggregate = "llm_aggregator.anak_glm:main"
 tppo-glm-aggregate = "llm_aggregator.tppo_glm:main"
+anak-qwen-aggregate = "llm_aggregator.anak_qwen:main"
+tppo-qwen-aggregate = "llm_aggregator.tppo_qwen:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -117,6 +117,9 @@ class FakeResponse:
     def json(self) -> dict[str, Any]:
         return self.payload
 
+    def close(self) -> None:
+        return None
+
     def iter_lines(self, decode_unicode: bool = False) -> list[str]:
         content = (
             self.payload.get("choices", [{}])[0]
@@ -330,6 +333,48 @@ def test_call_deepseek_retries_empty_200_then_accepts_valid_json() -> None:
     assert result.record == record
     assert result.request_attempts == 2
     assert session.calls == 2
+
+
+def _concurrency_429() -> FakeResponse:
+    body = (
+        '{"error":{"code":"rate_limit_exceeded","message":'
+        '"concurrency limit reached for requests: '
+        'zai-org/GLM-5.2-project limit reached"}}'
+    )
+    return FakeResponse({}, status_code=429, text=body)
+
+
+def test_call_deepseek_spins_past_concurrency_429_without_spending_attempts() -> None:
+    record = empty_record()
+    record["judul"] = ["PUTUSAN"]
+    session = FakeSession(
+        [
+            _concurrency_429(),
+            _concurrency_429(),
+            completion(json.dumps(record)),
+        ]
+    )
+    waits: list[float] = []
+
+    result = call_deepseek(
+        session,  # type: ignore[arg-type]
+        api_key="test",
+        source_name="one.txt",
+        source_text="PUTUSAN",
+        project=None,
+        timeout_seconds=1,
+        # A single validation attempt: the transient concurrency 429s must be
+        # absorbed by the in-request spin, not counted against this budget.
+        max_attempts=1,
+        max_output_tokens=4096,
+        base_delay_seconds=0,
+        sleep=waits.append,
+    )
+
+    assert result.record == record
+    assert result.request_attempts == 1
+    assert session.calls == 3
+    assert len(waits) == 2  # one short wait per concurrency rejection
 
 
 def test_call_deepseek_reports_request_lifecycle() -> None:

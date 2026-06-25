@@ -358,6 +358,30 @@ def is_infrastructure_error(error: str) -> bool:
     return any(marker.casefold() in error.casefold() for marker in INFRASTRUCTURE_ERROR_MARKERS)
 
 
+# Some W&B-hosted models (notably zai-org/GLM-5.2) sit behind a shared,
+# frequently-saturated project concurrency pool. They reject even a single
+# sequential request with HTTP 429 "concurrency limit reached for requests:
+# ...-project limit reached" roughly half the time, carry no Retry-After header,
+# and clear within ~1s. DeepSeek never hits this. Rather than burn the
+# validation retry budget (and trip the 60s network pause) on a rejection that
+# clears almost immediately, the request path spins in place on these specific
+# 429s with a short delay until a slot frees or the wall-clock budget elapses.
+CONCURRENCY_LIMIT_MARKERS = (
+    "concurrency limit reached",
+    "rate_limit_exceeded",
+    "project limit reached",
+)
+CONCURRENCY_RETRY_DELAY_SECONDS = 1.5
+CONCURRENCY_MAX_WAIT_SECONDS = 120.0
+
+
+def _is_concurrency_429(response: requests.Response) -> bool:
+    if response.status_code != 429:
+        return False
+    body = response.text.casefold()
+    return any(marker in body for marker in CONCURRENCY_LIMIT_MARKERS)
+
+
 @dataclass(frozen=True, slots=True)
 class ApiResult:
     record: dict[str, list[str]]
@@ -1409,13 +1433,38 @@ def call_deepseek(
                 max_attempts,
                 f"POST sent; timeout {timeout_seconds:g}s",
             )
-            response = session.post(
-                API_URL,
-                headers=headers,
-                json=body,
-                timeout=timeout_seconds,
-                stream=True,
-            )
+            concurrency_deadline = time.monotonic() + CONCURRENCY_MAX_WAIT_SECONDS
+            concurrency_waits = 0
+            while True:
+                response = session.post(
+                    API_URL,
+                    headers=headers,
+                    json=body,
+                    timeout=timeout_seconds,
+                    stream=True,
+                )
+                if (
+                    _is_concurrency_429(response)
+                    and time.monotonic() < concurrency_deadline
+                ):
+                    # Transient shared-pool rejection; it clears within ~1s and
+                    # carries no Retry-After. Spin without consuming the attempt
+                    # budget so a busy pool delays rather than fails the file.
+                    response.close()
+                    concurrency_waits += 1
+                    report(
+                        "Concurrency wait",
+                        attempt,
+                        max_attempts,
+                        f"{MODEL_LABEL} project concurrency busy; retry "
+                        f"#{concurrency_waits} in {CONCURRENCY_RETRY_DELAY_SECONDS:g}s",
+                    )
+                    sleep(
+                        CONCURRENCY_RETRY_DELAY_SECONDS
+                        + rng.uniform(0, 0.5)
+                    )
+                    continue
+                break
             if (
                 response.status_code == 400
                 and json_mode

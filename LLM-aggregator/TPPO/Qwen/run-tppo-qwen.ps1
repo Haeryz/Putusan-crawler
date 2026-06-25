@@ -1,34 +1,29 @@
 param(
     [ValidateSet("Run", "Status", "Pause", "Resume", "RetryEmpty")]
     [string]$Action = "Run",
-    # GLM-5.2 enforces a far lower W&B project-level concurrency cap than
-    # DeepSeek (~1 in-flight request). Running the DeepSeek default of 8 workers
-    # makes every request fail with HTTP 429 "concurrency limit reached for
-    # requests: zai-org/GLM-5.2-project limit reached" and the run livelocks.
-    # Keep this at 1 for GLM; raise only if W&B grants more GLM concurrency.
     [ValidateRange(1, 16)]
-    [int]$Workers = 1,
+    [int]$Workers = 8,
     [int]$MaxFiles = 0,
     [int]$TimeoutSeconds = 1200,
-    [int]$MaxAttempts = 4,
+    [int]$MaxAttempts = 2,
     [int]$MaxOutputTokens = 32768,
     [int]$NetworkFailureThreshold = 3,
     [int]$NetworkCooldownSeconds = 60,
     [ValidateSet("off", "low", "medium", "high", "xhigh")]
     [string]$ReasoningEffort = "off",
-    [switch]$NoTui,
-    [switch]$SkipPreflight
+    [string[]]$Source = @(),
+    [switch]$NoTui
 )
 
 $ErrorActionPreference = "Stop"
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 Set-Location -LiteralPath $RepositoryRoot
 
-$PauseFile = "LLM-aggregator/Anak/GLM/pause"
-$InputDir = "downloads/kasus anak/raw-text"
-$OutputDir = "LLM-aggregator/Anak/GLM/output"
-$StateFile = "LLM-aggregator/Anak/GLM/progress.jsonl"
-$EnvFile = "LLM-aggregator/Anak/Deepseek/.env"
+$PauseFile = "LLM-aggregator/TPPO/Qwen/pause"
+$InputDir = "downloads/TPPO/raw-text"
+$OutputDir = "LLM-aggregator/TPPO/Qwen/output"
+$StateFile = "LLM-aggregator/TPPO/Qwen/progress.jsonl"
+$EnvFile = "LLM-aggregator/TPPO/Deepseek/.env"
 
 if ($Action -eq "Pause") {
     New-Item -ItemType File -Force -Path $PauseFile | Out-Null
@@ -42,7 +37,7 @@ if ($Action -eq "Resume") {
 }
 
 $PythonArguments = @(
-    "-m", "llm_aggregator.anak_glm",
+    "-m", "llm_aggregator.tppo_qwen",
     "--input-dir", $InputDir,
     "--output-dir", $OutputDir,
     "--state", $StateFile,
@@ -68,17 +63,19 @@ if ($MaxFiles -gt 0) {
     $PythonArguments += @("--max-files", "$MaxFiles")
 }
 
+foreach ($SourceFile in $Source) {
+    if ($SourceFile) {
+        $PythonArguments += @("--source", $SourceFile)
+    }
+}
+
 if ($NoTui) {
     $PythonArguments += "--no-tui"
 }
 
-if ($SkipPreflight) {
-    $PythonArguments += "--skip-preflight"
-}
-
 $PythonArguments += @("--reasoning-effort", $ReasoningEffort)
 
-Write-Host "Action=$Action Workers=$Workers MaxFiles=$MaxFiles ReasoningEffort=$ReasoningEffort Model=zai-org/GLM-5.2"
+Write-Host "Action=$Action Workers=$Workers MaxFiles=$MaxFiles ReasoningEffort=$ReasoningEffort"
 $VenvPython = Join-Path $RepositoryRoot ".venv\Scripts\python.exe"
 if (Test-Path -LiteralPath $VenvPython) {
     & $VenvPython @PythonArguments
