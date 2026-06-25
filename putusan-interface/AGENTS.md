@@ -6,16 +6,16 @@ This repository is a SvelteKit frontend application. Source code lives in `src/`
 
 ## Build, Test, and Development Commands
 
-- `npm install`: install dependencies from `package.json` and the lockfile.
-- `npm run dev`: start the Vite development server.
-- `npm run build`: create a production build with Vite/SvelteKit.
-- `npm run preview`: serve the production build locally for review.
-- `npm run check`: run `svelte-check` with the project TypeScript config.
-- `npm run lint`: verify Prettier formatting and run ESLint.
-- `npm run format`: format the workspace with Prettier.
-- `npm run test:unit`: run Vitest unit and component tests.
-- `npm run test:e2e`: install Playwright browsers if needed and run end-to-end tests.
-- `npm test`: run unit tests once, then Playwright end-to-end tests.
+- `bun install`: install dependencies from `package.json` and `bun.lock`.
+- `bun run dev`: start the Vite development server.
+- `bun run build`: create a production build with Vite/SvelteKit.
+- `bun run preview`: serve the production build locally for review.
+- `bun run check`: run `svelte-check` with the project TypeScript config.
+- `bun run lint`: verify Prettier formatting and run ESLint.
+- `bun run format`: format the workspace with Prettier.
+- `bun run test:unit`: run Vitest unit and component tests.
+- `bun run test:e2e`: install Playwright browsers if needed and run end-to-end tests.
+- `bun run test`: run unit tests once, then Playwright end-to-end tests.
 
 ## Coding Style & Naming Conventions
 
@@ -23,7 +23,7 @@ Use TypeScript and Svelte conventions already present in the project. Keep compo
 
 ## Testing Guidelines
 
-Tests use Vitest for unit/component coverage and Playwright for browser-level behavior. Add deterministic tests next to the code or in the relevant feature folder. Prefer testing public behavior over implementation details. Run `npm run check`, `npm run lint`, and the relevant test command before submitting changes; run `npm test` for full local validation.
+Tests use Vitest for unit/component coverage and Playwright for browser-level behavior. Add deterministic tests next to the code or in the relevant feature folder. Prefer testing public behavior over implementation details. Run `bun run check`, `bun run lint`, and the relevant test command before submitting changes; run `bun run test` for full local validation.
 
 ## Commit & Pull Request Guidelines
 
