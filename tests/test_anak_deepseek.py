@@ -216,14 +216,28 @@ def test_minimum_evidence_rejects_empty_200_and_missing_labeled_fields() -> None
         validate_minimum_evidence(record, source)
 
 
-def test_minimum_evidence_rejects_court_decision_with_many_empty_sections() -> None:
-    source = "\n".join(["PUTUSAN", "Nomor 1", "Nama lengkap: ANAK", *("isi" for _ in range(45))])
+def test_minimum_evidence_keeps_legitimately_sparse_rulings() -> None:
+    # A diversi penetapan genuinely lacks the trial sections. It must NOT be
+    # discarded for having many empty sections; only an absent operative ruling
+    # (MENGADILI/MENETAPKAN with empty amar) is a real under-extraction.
+    source = "\n".join(["PENETAPAN", "Nomor 1", "Nama lengkap: ANAK", *("isi" for _ in range(45))])
+    record = empty_record()
+    record["judul"] = ["PENETAPAN"]
+    record["nomor_putusan"] = ["Nomor 1"]
+    record["nama_lengkap"] = ["ANAK"]
+
+    # No ruling marker present -> sparse content is accepted, not rejected.
+    validate_minimum_evidence(record, source)
+
+
+def test_minimum_evidence_rejects_ruling_with_empty_amar() -> None:
+    source = "\n".join(["PUTUSAN", "Nomor 1", "Nama lengkap: ANAK", "MENGADILI:", "1. Menghukum"])
     record = empty_record()
     record["judul"] = ["PUTUSAN"]
     record["nomor_putusan"] = ["Nomor 1"]
     record["nama_lengkap"] = ["ANAK"]
 
-    with pytest.raises(ValidationError, match="too many empty sections"):
+    with pytest.raises(ValidationError, match="amar_putusan is empty"):
         validate_minimum_evidence(record, source)
 
 
@@ -277,7 +291,10 @@ def test_repair_empty_sections_fills_penetapan_template_anchors() -> None:
     assert repaired["tahun"] == ["2026"]
 
 
-def test_diversion_penetapan_trial_sections_are_structurally_non_applicable() -> None:
+def test_absent_sections_are_reported_as_empty_not_non_applicable() -> None:
+    # There is no "non-applicable" bucket: any section the model could not
+    # anchor to source is reported as a plain empty section, including the
+    # trial sections that a diversi penetapan genuinely does not contain.
     source = (
         "PENETAPAN\n"
         "Nomor 3/Pen.Div/2026/PN Mrs\n"
@@ -295,11 +312,15 @@ def test_diversion_penetapan_trial_sections_are_structurally_non_applicable() ->
 
     reported_empty = empty_sections_for_report(record, source)
 
-    assert "dakwaan" not in reported_empty
-    assert "saksi" not in reported_empty
-    assert "terdakwa" not in reported_empty
-    assert "agama" not in reported_empty
+    # Sections genuinely absent from the document now count as empty.
+    assert "dakwaan" in reported_empty
+    assert "saksi" in reported_empty
+    assert "terdakwa" in reported_empty
+    assert "agama" in reported_empty
     assert "irah_irah" in reported_empty
+    # Extracted sections never appear in the empty list.
+    assert "judul" not in reported_empty
+    assert "nama_lengkap" not in reported_empty
 
 
 def test_parse_model_json_rejects_empty_http_200_content() -> None:

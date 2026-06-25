@@ -894,11 +894,11 @@ def validate_span_record(
                     raise ValidationError(f"{key}.text contains an empty string")
                 exact = align_source_excerpt(text, source_text)
                 if exact is None:
-                    if key in {"hari", "tanggal", "tahun"}:
-                        continue
-                    raise ValidationError(
-                        f"{key}.text is not an exact source excerpt: {text[:120]!r}"
-                    )
+                    # A single non-verbatim literal must not sink the whole
+                    # 31-section answer. Drop just this item; the section keeps
+                    # its other literals, and if it empties out the deterministic
+                    # anchor pass (repair_empty_sections) refills it from source.
+                    continue
                 cleaned.append(exact)
             record[key] = cleaned
             continue
@@ -1151,50 +1151,13 @@ def repair_empty_sections(
     return validate_record(repaired, source_text)
 
 
-_DIVERSION_NON_APPLICABLE = {
-    "penangkapan",
-    "penahanan",
-    "tuntutan",
-    "dakwaan",
-    "saksi",
-    "ahli",
-    "terdakwa",
-    "surat",
-    "petunjuk_barang_bukti",
-    "fakta_hukum",
-    "hari",
-    "panitera_pengganti",
-}
-
-
-def non_applicable_sections(source_text: str) -> set[str]:
-    if (
-        re.search(r"\bP\s*E\s*N\s*E\s*T\s*A\s*P\s*A\s*N\b", source_text, re.IGNORECASE)
-        and re.search(r"\bdiversi\b", source_text, re.IGNORECASE)
-        and not _MENGADILI.search(source_text)
-    ):
-        return set(_DIVERSION_NON_APPLICABLE)
-    return set()
-
-
 def empty_sections_for_report(
     record: Mapping[str, list[str]],
     source_text: str,
 ) -> list[str]:
-    excluded = non_applicable_sections(source_text)
-    for key in (
-        "tempat_lahir",
-        "umur_tanggal_lahir",
-        "jenis_kelamin",
-        "kebangsaan",
-        "tempat_tinggal",
-        "agama",
-        "pekerjaan",
-    ):
-        marker = _EXPECTED_MARKERS.get(key)
-        if marker is not None and not marker.search(source_text):
-            excluded.add(key)
-    return [key for key in SECTION_KEYS if not record[key] and key not in excluded]
+    # Every section the model could not anchor to source is reported as empty.
+    # There is no "non-applicable" bucket: an absent section is simply empty.
+    return [key for key in SECTION_KEYS if not record[key]]
 
 
 def validate_minimum_evidence(
@@ -1213,12 +1176,19 @@ def validate_minimum_evidence(
         raise ValidationError(
             f"obvious labeled source fields were returned empty: {missing_obvious}"
         )
-    if len(source_text.splitlines()) > 40:
-        empty = empty_sections_for_report(record, source_text)
-        if len(empty) > 2:
-            raise ValidationError(
-                f"too many empty sections for a court decision: {empty}"
-            )
+    # A document that reaches its operative ruling (MENGADILI / MENETAPKAN) must
+    # surface that ruling; an empty amar after the anchor pass means the model
+    # genuinely under-extracted and the attempt should be retried. Legitimately
+    # sparse rulings (e.g. diversi penetapan, anonymised child cases) keep their
+    # real empty sections and are no longer discarded as "too many empty".
+    source_lines = source_text.splitlines()
+    has_ruling = any(
+        _MENGADILI.search(line) or _MENETAPKAN.search(line) for line in source_lines
+    )
+    if has_ruling and not record["amar_putusan"]:
+        raise ValidationError(
+            "operative ruling (MENGADILI/MENETAPKAN) present but amar_putusan is empty"
+        )
 
 
 _STRING_RANGE = re.compile(r"^\s*(\d+)\s*(?:[-–—:]\s*(\d+))?\s*$")
@@ -1269,13 +1239,31 @@ def normalize_line_ranges(value: Any) -> list[list[int]] | None:
 
 
 def align_source_excerpt(excerpt: str, source_text: str) -> str | None:
-    """Return the exact source span when only whitespace layout differs."""
+    """Return the exact source span when only whitespace layout differs.
+
+    The model frequently restyles short headings (e.g. it returns the title as
+    ``"P U T U S A N"`` while the source carries ``"PUTUSAN"``, or vice versa).
+    These are real source spans whose only difference is intra-token spacing, so
+    a single non-verbatim heading must not be treated as a hallucination that
+    sinks the whole 31-section answer. Recovery is attempted in widening order
+    and always returns the actual contiguous source substring.
+    """
     if excerpt in source_text:
         return excerpt
     pieces = re.findall(r"\S+", excerpt)
     if not pieces:
         return None
+    # 1) word tokens separated by at least one whitespace run (layout-only diff).
     pattern = r"\s+".join(re.escape(piece) for piece in pieces)
+    match = re.search(pattern, source_text)
+    if match:
+        return match.group(0)
+    # 2) letter-spacing diff on a short heading: allow optional whitespace
+    #    between every non-space character so "P U T U S A N" <-> "PUTUSAN".
+    chars = [char for char in excerpt if not char.isspace()]
+    if not chars or len(chars) > 40:
+        return None
+    pattern = r"\s*".join(re.escape(char) for char in chars)
     match = re.search(pattern, source_text)
     return match.group(0) if match else None
 
@@ -1700,10 +1688,6 @@ def write_individual_output(
         "usage": result.usage,
         "request_attempts": result.request_attempts,
     }
-    if source_text is not None:
-        structurally_absent = sorted(non_applicable_sections(source_text))
-        if structurally_absent:
-            document["non_applicable_sections"] = structurally_absent
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
         json.dumps(document, ensure_ascii=False, indent=2) + "\n",
@@ -1782,18 +1766,15 @@ def load_individual_output(
             temporary.replace(path)
         return {**document, "sections": {key: [] for key in SECTION_KEYS}}
     report_empty = empty_sections_for_report(sections, source_text)
-    structurally_absent = sorted(non_applicable_sections(source_text))
+    # Migrate any legacy "non_applicable_sections" bucket into plain empties.
     metadata_changed = (
         document.get("empty_sections") != report_empty
-        or document.get("non_applicable_sections", []) != structurally_absent
+        or "non_applicable_sections" in document
     )
     if document.get("sections") != sections or metadata_changed:
         document["sections"] = sections
         document["empty_sections"] = report_empty
-        if structurally_absent:
-            document["non_applicable_sections"] = structurally_absent
-        else:
-            document.pop("non_applicable_sections", None)
+        document.pop("non_applicable_sections", None)
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(
             json.dumps(document, ensure_ascii=False, indent=2) + "\n",
@@ -1907,9 +1888,6 @@ def process_source(
                     request_attempts=result.request_attempts,
                     usage=result.usage,
                 )
-                structurally_absent = sorted(non_applicable_sections(source_text))
-                if structurally_absent:
-                    event["non_applicable_sections"] = structurally_absent
                 return ProcessOutcome(
                     source=source,
                     source_hash=source_hash,
@@ -1941,9 +1919,6 @@ def process_source(
             request_attempts=result.request_attempts,
             usage=result.usage,
         )
-        structurally_absent = sorted(non_applicable_sections(source_text))
-        if structurally_absent:
-            event["non_applicable_sections"] = structurally_absent
         if previous_record is not None:
             event["extraction_status"] = "retry_improved"
         return ProcessOutcome(
