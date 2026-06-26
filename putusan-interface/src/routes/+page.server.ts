@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
+import { readVerified } from '$lib/server/verifiedStore';
 import type { PageServerLoad } from './$types';
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -216,6 +217,7 @@ export const load: PageServerLoad = async () => {
 		csvReference: await readCsvReference(csvPath),
 		columns: rowColumns,
 		modelSummaries: results.map((result) => result.summary),
-		rows: results.flatMap((result) => result.rows)
+		rows: results.flatMap((result) => result.rows),
+		verified: await readVerified()
 	};
 };
