@@ -1,0 +1,93 @@
+{
+  "status": "completed",
+  "source_file": "10_Pid.Sus-Anak_2025_PN_Kds.txt",
+  "source_path": "downloads/kasus anak/raw-text/10_Pid.Sus-Anak_2025_PN_Kds.txt",
+  "source_sha256": "e99c1b718f54f06590a93c8baf0aa141180f36ba4271df253d0d67a52d30b0a1",
+  "sections": {
+    "judul": [
+      "                PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "                 Nomor 7/Pen.Div/2025/PN Kds\n                   Jo.         \n                Nomor 10/Pid.Sus-Anak/2025/PN Kds"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Anak Pada Pengadilan Negeri Kudus,"
+    ],
+    "keterangan_perkara": [
+      "Setelah membaca Laporan Balai  Kemasyarakatan Kelas II Pati\nNomor  xxxxxxxxxxxxxxxxxxxxxxxx  tanggal  13  Mei  2026 tentang\npelaksanaan kesepakatan diversi dalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "xxxxxxxxxx"
+    ],
+    "tempat_lahir": [
+      "xxxxxxxxxx"
+    ],
+    "umur_tanggal_lahir": [
+      "xxxxxxxxxxxxxxxx"
+    ],
+    "jenis_kelamin": [
+      "xxxxxxxx"
+    ],
+    "kebangsaan": [
+      "xxxxxxxxxxxxxxx"
+    ],
+    "tempat_tinggal": [
+      "xxxxxxxxxxxxxxxxxx"
+    ],
+    "agama": [
+      "xxxxxxxxx"
+    ],
+    "pekerjaan": [
+      "xxxxxxxxxxxxxxx"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [
+      "Menimbang,  bahwa  berdasarkan  Laporan  Balai\nKemasyarakatan  Kelas  II  Pati  Nomor\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  tanggal  13  Mei  2026 pada\npokoknya  melaporkan  bahwa  kesepakatan  diversi  telah  selesai\ndilaksanakan;\nMenimbang,  bahwa  oleh  karena  kesepakatan  diversi  telah\nselesai  dilaksanakan  maka  proses  pemeriksaan  perkara  Anak  harus\ndihentikan;"
+    ],
+    "pertimbangan_hukum": [
+      "Memperhatikan  Pasal  12  ayat  (3),  ayat  (4),  dan  ayat  (5)\nUndang-Undang  Nomor  11  Tahun  2012  tentang  Sistem  Peradilan\nPidana Anak dan Pasal 59 Peraturan Pemerintah Nomor 65 Tahun 2015\ntentang  Pedoman  Pelaksanaan  Diversi  dan  Penanganan  Anak  yang\nBelum Berumur 12 (dua belas) Tahun dan belum berumur 18 (delapan\nbelas) tahun;"
+    ],
+    "amar_putusan": [
+      "MENETAPKAN:\n                                                                                          halaman 1 dari 2 halaman\nPenetapan Nomor7/Pen.Div/2025/PN Kds Jo 10/Pid.Sus-Anak/2025/PN Kds \n\n1.-----------------Menghentikan proses pemeriksaan perkara Anak\nxxxxxxxxxxxxxx;\n2.- -Memerintahkan Panitera mengirimkan salinan penetapan ini\nkepada  Penuntut  Umum,  Pembimbing  Kemasyarakatan, dan\nAnak/Orang tuanya, serta Anak Korban/Orang tuanya;"
+    ],
+    "hari": [],
+    "tanggal": [
+      "Pada tanggal 18 Mei 2026,"
+    ],
+    "tahun": [
+      "2026"
+    ],
+    "siapa_yang_memutus": [
+      "                 Hakim,\nttd\n    Khalid Soroinda. S.H, M.H."
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "    Ditetapkan di Kudus,\nPada tanggal 18 Mei 2026,\n                 Hakim,\nttd\n    Khalid Soroinda. S.H, M.H."
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "hari",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}
