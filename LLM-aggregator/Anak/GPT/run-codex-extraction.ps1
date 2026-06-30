@@ -4,7 +4,7 @@ param(
     [Alias("MaxFiles")]
     [ValidateRange(0, 100000)]
     [int]$Target = 0,
-    [string]$Model = "",
+    [string]$Model = "gpt-5.4-mini",
     [ValidateSet("Span", "Legacy")]
     [string]$Mode = "Span",
     # Boundary location with explicit line numbers + a deterministic verifier
@@ -23,7 +23,10 @@ param(
     [switch]$DisableUsageGuard,
     [switch]$DisableWallClockGuard,
     [switch]$JsonEvents,
-    [switch]$NoPause
+    [switch]$NoPause,
+    # Disable the Rich live dashboard rendered by run_extractions.py and stream
+    # Codex output line-by-line instead.
+    [switch]$NoTui
 )
 
 $ErrorActionPreference = "Stop"
@@ -358,6 +361,44 @@ if ($Action -eq "Prompt") {
     exit 0
 }
 
+# Span mode shares one cross-platform engine with the macOS/Linux launchers:
+# run_extractions.py owns the extraction loop, usage guard, and stop reports,
+# and renders the Rich live dashboard that matches the DeepSeek/Qwen
+# aggregators. Delegating here keeps a single implementation (and a single live
+# TUI) instead of a duplicate PowerShell loop. The in-script span loop below is
+# retained only as a fallback when the engine is unavailable.
+if ($Mode -ne "Legacy") {
+    $enginePath = Join-Path $RepositoryRoot "run_extractions.py"
+    if (Test-Path -LiteralPath $enginePath) {
+        $python = Resolve-PythonCommand
+        $pyArgs = @(
+            "run_extractions.py",
+            "--corpus", "Anak",
+            "--target", "$Target",
+            "--reasoning-effort", $ReasoningEffort,
+            "--usage-stop-percent", "$UsageStopPercent",
+            "--max-run-minutes", "$MaxRunMinutes"
+        )
+        if ($Model.Trim().Length -gt 0) { $pyArgs += @("--model", $Model) }
+        if ($UsageStatusFile.Trim().Length -gt 0) { $pyArgs += @("--usage-status-file", $UsageStatusFile) }
+        if (-not $DisableMcp) { $pyArgs += "--keep-mcp" }
+        if ($DisableUsageGuard) { $pyArgs += "--disable-usage-guard" }
+        if ($DisableWallClockGuard) { $pyArgs += "--disable-wall-clock-guard" }
+        if ($JsonEvents) { $pyArgs += "--json-events" }
+        if ($NoPause) { $pyArgs += "--no-pause" }
+        if ($NoTui) { $pyArgs += "--no-tui" }
+        # Preserve the PowerShell parallel heuristic: parallel runs need the usage
+        # guard off, and the engine fans out only when --jobs > 1.
+        if ($DisableUsageGuard -and $Target -gt 1) { $pyArgs += @("--jobs", "$Target") }
+        $exe = $python[0]
+        $prefix = @()
+        if ($python.Count -gt 1) { $prefix = $python[1..($python.Count - 1)] }
+        & $exe @prefix @pyArgs
+        exit $LASTEXITCODE
+    }
+    Write-Warning "run_extractions.py not found at $enginePath; falling back to the in-script span loop (no live dashboard)."
+}
+
 $CodexCommand = Get-Command "codex.cmd" -ErrorAction SilentlyContinue
 if ($null -eq $CodexCommand) {
     $CodexCommand = Get-Command "codex" -ErrorAction SilentlyContinue
@@ -563,19 +604,52 @@ exit `$LASTEXITCODE
         $lastSourceHandled = $source.Name
         $exitCode = Invoke-CodexWithPrompt -PromptPath $promptPath
         Remove-Item -LiteralPath $promptPath -Force -ErrorAction SilentlyContinue
+
+        # Codex frequently exits non-zero even after writing a complete spans
+        # file -- most often when the 5h usage limit is exhausted right as the
+        # session ends. The extraction itself still succeeded, so always try to
+        # expand + checkpoint a spans file that exists BEFORE treating the run
+        # as failed. Otherwise a finished extraction is silently thrown away and
+        # never reaches the output/ directory or progress.jsonl. (The parallel
+        # branch already salvages unconditionally; this aligns the sequential
+        # path with it.)
+        $saved = $false
+        if (Test-Path -LiteralPath $spansPath) {
+            try {
+                $summary = Invoke-SpanExpand -SourcePath $source.FullName -SpansPath $spansPath `
+                    -OutputPath $outputPath -SourceName $source.Name
+                Add-Checkpoint -SummaryJson $summary
+                $completedThisRun.Add($outputPath) | Out-Null
+                Write-Host "Completed: $($source.Name) -> $outputPath"
+                $saved = $true
+            } catch {
+                Write-Warning "Spans for $($source.Name) could not be expanded: $_"
+            }
+        }
+
         if ($exitCode -ne 0) {
-            $failuresThisRun.Add("$($source.Name): Codex exit $exitCode") | Out-Null
-            New-RunStopReport -Reason "Codex session failed with exit code $exitCode" -ProcessedCount $completedThisRun.Count `
+            $reason = if ($saved) {
+                "Codex session exited $exitCode after $($source.Name) was saved (likely 5h usage limit reached)"
+            } else {
+                "Codex session failed with exit code $exitCode"
+            }
+            if (-not $saved) {
+                $failuresThisRun.Add("$($source.Name): Codex exit $exitCode") | Out-Null
+            }
+            New-RunStopReport -Reason $reason -ProcessedCount $completedThisRun.Count `
                 -CompletedOutputs ($completedThisRun.ToArray()) -LastSource $lastSourceHandled `
                 -UsageStatus (Get-CodexUsageStatus -StatusFile $UsageStatusFile) -Failures ($failuresThisRun.ToArray())
+            if ($saved) {
+                Write-Host "Stopping after non-zero Codex exit; the completed source was saved first."
+                exit 0
+            }
             Write-Error "Codex session $sessionIndex failed with exit code $exitCode."
             exit $exitCode
         }
-        $summary = Invoke-SpanExpand -SourcePath $source.FullName -SpansPath $spansPath `
-            -OutputPath $outputPath -SourceName $source.Name
-        Add-Checkpoint -SummaryJson $summary
-        $completedThisRun.Add($outputPath) | Out-Null
-        Write-Host "Completed: $($source.Name) -> $outputPath"
+
+        if (-not $saved) {
+            throw "Spans file was not produced by Codex: $spansPath"
+        }
     }
 }
 
