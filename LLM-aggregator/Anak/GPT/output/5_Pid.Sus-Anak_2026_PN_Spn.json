@@ -1,0 +1,91 @@
+{
+  "status": "completed",
+  "source_file": "5_Pid.Sus-Anak_2026_PN_Spn.txt",
+  "source_path": "downloads/kasus anak/raw-text/5_Pid.Sus-Anak_2026_PN_Spn.txt",
+  "source_sha256": "dd1d7c3c699ba67e99d078df39bcdfdc7c2a5654fe1b60821cd5501ef8f99bef",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 1/Pen.Div/2026/PN Spn\nJo.\nNomor 5/Pid.Sus-Anak/2026/PN Spn"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Pengadilan Negeri Sungai Penuh;"
+    ],
+    "keterangan_perkara": [
+      "Membaca  Laporan  Pembimbing  Kemasyarakatan  tentang  pelaksanaan\nKesepakatan Diversi dalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "xxx"
+    ],
+    "tempat_lahir": [
+      "xxx"
+    ],
+    "umur_tanggal_lahir": [
+      "18 Tahun/ 11 Juli 2007"
+    ],
+    "jenis_kelamin": [
+      "Laki-laki"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "xxx"
+    ],
+    "agama": [
+      "Islam"
+    ],
+    "pekerjaan": [
+      "Pelajar"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [
+      "2. Menetapkan agar barang bukti berupa:\n- 1 (satu) buah baju sekolah lengan pendek berwarna putih dan memiliki\nlambang OSIS berwarna coklat disaku kiri dengan merk Martin Singapore;\n- 1 (satu) buah celana panjang sekolah berwarna abu-abu dengan coretan\nbintang 4 (empat) dibagian lutut kanan yang memiliki 2 (dua) buah robekan;\nDimusnahkan;\n3. Memerintahkan  Panitera mengirimkan salinan penetapan ini kepada Penuntut\nUmum dan Anak/Orangtua/Wali."
+    ],
+    "fakta_hukum": [],
+    "pertimbangan_hukum": [
+      "Menimbang,  bahwa  oleh  karena  berdasarkan  Hasil  Kesepakatan  Diversi\ntanggal  30  April  2026  telah  berhasil  dan  selesai  dilaksanakan,  maka  proses\npemeriksaan perkara Anak xxx harus dihentikan;\nMemperhatikan Pasal 12 ayat (3), ayat (4), dan ayat (5) Undang-Undang\nNomor 11 Tahun 2012 tentang Sistem Peradilan Pidana Anak."
+    ],
+    "amar_putusan": [
+      "MENETAPKAN\n1. Menghentikan proses pemeriksaan perkara Anak xxx; \n2. Menetapkan agar barang bukti berupa:\n- 1 (satu) buah baju sekolah lengan pendek berwarna putih dan memiliki\nlambang OSIS berwarna coklat disaku kiri dengan merk Martin Singapore;\n- 1 (satu) buah celana panjang sekolah berwarna abu-abu dengan coretan\nbintang 4 (empat) dibagian lutut kanan yang memiliki 2 (dua) buah robekan;\nDimusnahkan;\n3. Memerintahkan  Panitera mengirimkan salinan penetapan ini kepada Penuntut\nUmum dan Anak/Orangtua/Wali."
+    ],
+    "hari": [],
+    "tanggal": [
+      "30 April 2026"
+    ],
+    "tahun": [],
+    "siapa_yang_memutus": [],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "                              Ditetapkan di Sungai Penuh,\n                            Pada tanggal 30 April 2026\n                                                 Hakim \nttd\n\n                       Ester Josephin Pratiwi Hutagaol, S.H."
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "fakta_hukum",
+    "hari",
+    "tahun",
+    "siapa_yang_memutus",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

@@ -1,0 +1,93 @@
+{
+  "status": "completed",
+  "source_file": "6_Pid.Sus-Anak_2026_PN_Mna.txt",
+  "source_path": "downloads/kasus anak/raw-text/6_Pid.Sus-Anak_2026_PN_Mna.txt",
+  "source_sha256": "2ec0f212eeda3470c1ec016e5b25c29ef6f3b1be93188e59d19146f53c160f3e",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 6/Pid.Sus-Anak/2026/PN Mna"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Majelis Hakim Anak Pengadilan Negeri Manna"
+    ],
+    "keterangan_perkara": [
+      "Membaca Laporan Pembimbing Kemasyarakatan Nomor:  WP .8.PAS.5-\nPK.06.01-266 tanggal 3 Juni 2026 tentang pelaksanaan kesepakatan diversi dalam\nperkara Anak:"
+    ],
+    "nama_lengkap": [
+      "ANAK"
+    ],
+    "tempat_lahir": [
+      "Bengkulu Selatan"
+    ],
+    "umur_tanggal_lahir": [
+      "15 T ahun/ 10 September 2010"
+    ],
+    "jenis_kelamin": [
+      "Laki-laki"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "Kabupaten Bengkulu Selatan"
+    ],
+    "agama": [
+      "Islam"
+    ],
+    "pekerjaan": [
+      "Pelajar"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [
+      "2. Menetapkan agar barang bukti berupa:\n- 3 (tiga) karung gabah padi;\nDikembalikan kepada Korban Ridianto Bin (Alm) Amad Juri;\n3. Memerintahkan Panitera mengirimkan salinan penetapan ini kepada Penuntut"
+    ],
+    "fakta_hukum": [],
+    "pertimbangan_hukum": [
+      "Menimbang,  bahwa  oleh  karena  berdasarkan  Laporan  Pembimbing\nKemasyarakatan Nomor: WP .8.PAS.5-PK.06.01-266 tanggal 3 Juni 2026 kesepakatan\ndiversi telah selesai dilaksanakan, maka proses pemeriksaan perkara Anak harus\ndihentikan;\nMemerhatikan Pasal 12 ayat (3), ayat (4), dan  ayat (5) Undang-Undang\nNomor  11  T ahun  2012  tentang Sistem Peradilan Pidana Anak dan  Pasal  59\nPeraturan Pemerintah Nomor 65 T ahun 2015 tentang Pedoman Pelaksanaan Diversi\ndan Penanganan Anak yang Belum Berumur 12 (Dua Belas) T ahun."
+    ],
+    "amar_putusan": [
+      "MENETAPKAN\n1. Menghentikan proses pemeriksaan perkara Anak;\n2. Menetapkan agar barang bukti berupa:\n- 3 (tiga) karung gabah padi;\nDikembalikan kepada Korban Ridianto Bin (Alm) Amad Juri;\n3. Memerintahkan Panitera mengirimkan salinan penetapan ini kepada Penuntut\nUmum."
+    ],
+    "hari": [],
+    "tanggal": [
+      "4 Juni 2026"
+    ],
+    "tahun": [
+      "2026"
+    ],
+    "siapa_yang_memutus": [
+      "Hakim Anggota,\nDitetapkan di Manna;\nPada tanggal 4 Juni 2026\nHakim Ketua,\nHalaman 1 dari 2 Halaman Penetapan Nomor 6/Pid.Sus-Anak/2026/PN Mna\n\nY osephine Mathilda Hutabarat, S.H.\nNurul Fitri, S.H.\nSamuel Fajar Hotmangara Tua Siahaan, S.H."
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Hakim Anggota,\nDitetapkan di Manna;\nPada tanggal 4 Juni 2026\nHakim Ketua,\nHalaman 1 dari 2 Halaman Penetapan Nomor 6/Pid.Sus-Anak/2026/PN Mna\n\nY osephine Mathilda Hutabarat, S.H.\nNurul Fitri, S.H.\nSamuel Fajar Hotmangara Tua Siahaan, S.H."
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "fakta_hukum",
+    "hari",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}
