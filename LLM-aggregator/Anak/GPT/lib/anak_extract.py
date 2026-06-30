@@ -131,6 +131,49 @@ def _slice_lines(lines: list[str], start: int, end: int) -> str:
     return "\n".join(lines[start - 1:end]).strip("\n")
 
 
+def _normalize_line_ranges(raw: object) -> list[tuple[int, int]]:
+    """Coerce the model's "lines" spec into clean [start, end] integer pairs.
+
+    The contract is a list of pairs ([[4, 8], [10, 12]]), but the model often
+    emits a looser shape. Rather than abort the whole file we salvage the common
+    malformations and skip anything truly unusable:
+        [[4, 8], [10, 12]] -> [(4, 8), (10, 12)]   # already correct
+        [4, 8]             -> [(4, 8)]             # a single un-nested pair
+        4  / "4"           -> [(4, 4)]             # a bare line number
+        [4]                -> [(4, 4)]             # a single-line list
+    """
+    def to_int(x: object) -> int | None:
+        try:
+            return int(x)
+        except (TypeError, ValueError):
+            return None
+
+    if not isinstance(raw, (list, tuple)):
+        n = to_int(raw)
+        return [(n, n)] if n is not None else []
+    if not raw:
+        return []
+    # A flat [start, end] pair of scalars (the model forgot to nest it).
+    if (len(raw) == 2
+            and not any(isinstance(x, (list, tuple)) for x in raw)
+            and all(to_int(x) is not None for x in raw)):
+        a, b = to_int(raw[0]), to_int(raw[1])
+        return [(min(a, b), max(a, b))]
+    pairs: list[tuple[int, int]] = []
+    for entry in raw:
+        if isinstance(entry, (list, tuple)):
+            ints = [v for v in (to_int(x) for x in entry) if v is not None]
+            if len(ints) >= 2:
+                pairs.append((min(ints[0], ints[1]), max(ints[0], ints[1])))
+            elif len(ints) == 1:
+                pairs.append((ints[0], ints[0]))
+        else:
+            n = to_int(entry)
+            if n is not None:
+                pairs.append((n, n))
+    return pairs
+
+
 def expand(spans: dict, lines: list[str]) -> tuple[dict, list[str]]:
     """Turn the model's pointer/literal spans into section excerpt arrays.
 
@@ -147,19 +190,29 @@ def expand(spans: dict, lines: list[str]) -> tuple[dict, list[str]]:
     for key in SECTION_KEYS:
         spec = section_specs.get(key, {})
         values: list[str] = []
+        # Accept the contracted dict form plus the looser shapes the model emits
+        # in practice (bare ranges/number without the {"lines": ...} wrapper, or
+        # a literal string), so one malformed section never aborts the file.
+        lines_spec = None
+        text_spec = None
         if isinstance(spec, dict):
-            if spec.get("lines"):
-                for pair in spec["lines"]:
-                    if not isinstance(pair, (list, tuple)) or len(pair) != 2:
-                        raise ValueError(f"{key}: bad line range {pair!r}")
-                    excerpt = _slice_lines(lines, int(pair[0]), int(pair[1]))
-                    if excerpt:
-                        values.append(excerpt)
-            elif spec.get("text"):
-                for item in spec["text"]:
-                    s = str(item)
-                    if s.strip():
-                        values.append(_snap_literal(s, cleaned))
+            if not spec.get("empty"):
+                lines_spec = spec.get("lines")
+                text_spec = spec.get("text")
+        elif isinstance(spec, (list, tuple, int)):
+            lines_spec = spec
+        elif isinstance(spec, str):
+            text_spec = [spec]
+        if lines_spec:
+            for start, end in _normalize_line_ranges(lines_spec):
+                excerpt = _slice_lines(lines, start, end)
+                if excerpt:
+                    values.append(excerpt)
+        elif text_spec:
+            for item in text_spec:
+                s = str(item)
+                if s.strip():
+                    values.append(_snap_literal(s, cleaned))
         sections[key] = values
     empty = [k for k in SECTION_KEYS if not sections[k]]
     return sections, empty
