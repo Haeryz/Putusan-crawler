@@ -1,0 +1,96 @@
+{
+  "status": "completed",
+  "source_file": "2_Pid.Sus-Anak_2026_PN_Kds.txt",
+  "source_path": "downloads/kasus anak/raw-text/2_Pid.Sus-Anak_2026_PN_Kds.txt",
+  "source_sha256": "43ae754d3ddf0ea047c9038be23b00e27398ddd72c5c5ef68e75555e7d7ce512",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 1/Pen.Div/2026/PN Kds"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Anak Pada Pengadilan Negeri Kudus,"
+    ],
+    "keterangan_perkara": [
+      "Setelah  membaca  Laporan  Hasil  Pengawasan  Pelaksanaan\nKesepakatan  Diversi  tanggal  17  April  2026  yang  dibuat  oleh\nPembimbing Kemasyarakatan dari Balai Pemasyarakatan Kelas II Pati\ndalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "Anak"
+    ],
+    "tempat_lahir": [
+      "Kudus"
+    ],
+    "umur_tanggal_lahir": [
+      "2009"
+    ],
+    "jenis_kelamin": [
+      "Laki-laki"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "Kabupaten Kudus"
+    ],
+    "agama": [
+      "Islam"
+    ],
+    "pekerjaan": [
+      "Pelajar/mahasiswa"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [
+      "Pembimbing Kemasyarakatan dari Balai Pemasyarakatan Kelas II Pati"
+    ],
+    "terdakwa": [],
+    "surat": [
+      "Setelah  membaca  Laporan  Hasil  Pengawasan  Pelaksanaan\nKesepakatan  Diversi  tanggal  17  April  2026  yang  dibuat  oleh\nPembimbing Kemasyarakatan dari Balai Pemasyarakatan Kelas II Pati",
+      "Menimbang,  bahwa  berdasarkan  Hasil  Pengawasan\nPelaksanaan Kesepakatan Diversi tanggal 17 April 2026 yang dibuat\noleh Pembimbing Kemasyarakatan dari Balai Pemasyarakatan Kelas II\nPati pada pokoknya melaporkan bahwa kesepakatan diversi tanggal 15\nApril 2026 telah selesai dilaksanakan seluruhnya oleh Anak;"
+    ],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [
+      "Menimbang,  bahwa  berdasarkan  Hasil  Pengawasan\nPelaksanaan Kesepakatan Diversi tanggal 17 April 2026 yang dibuat\noleh Pembimbing Kemasyarakatan dari Balai Pemasyarakatan Kelas II\nPati pada pokoknya melaporkan bahwa kesepakatan diversi tanggal 15\nApril 2026 telah selesai dilaksanakan seluruhnya oleh Anak;\nMenimbang,  bahwa  oleh  karena  kesepakatan  diversi  telah\nselesai  dilaksanakan  maka  proses  pemeriksaan  perkara  Anak  harus\ndihentikan;"
+    ],
+    "pertimbangan_hukum": [
+      "Menimbang,  bahwa  berdasarkan  Hasil  Pengawasan\nPelaksanaan Kesepakatan Diversi tanggal 17 April 2026 yang dibuat\noleh Pembimbing Kemasyarakatan dari Balai Pemasyarakatan Kelas II\nPati pada pokoknya melaporkan bahwa kesepakatan diversi tanggal 15\nApril 2026 telah selesai dilaksanakan seluruhnya oleh Anak;\nMenimbang,  bahwa  oleh  karena  kesepakatan  diversi  telah\nselesai  dilaksanakan  maka  proses  pemeriksaan  perkara  Anak  harus\ndihentikan;\nMemperhatikan  Pasal  12  ayat  (3),  ayat  (4),  dan  ayat  (5)\nUndang-Undang  Nomor  11  Tahun  2012  tentang  Sistem  Peradilan\nPidana Anak dan Pasal 59 Peraturan Pemerintah Nomor 65 Tahun 2015\ntentang  Pedoman  Pelaksanaan  Diversi  dan  Penanganan  Anak  yang\nBelum Berumur 12 (dua belas) Tahun;"
+    ],
+    "amar_putusan": [
+      "MENETAPKAN:\n1. Menghentikan proses pemeriksaan perkara Anak;\n\nhalaman 1 dari 2 halaman\nPenetapan Nomor 1/Pen.Div/2026/PN Kds Jo 2/Pid.Sus-Anak/2026/PN Kds \n\n2. Memerintahkan  Panitera  mengirimkan  salinan  penetapan  ini\nkepada  Penuntut  Umum,  Pembimbing  Kemasyarakatan, dan\nAnak/Orang tuanya, serta Anak Korban/Orang tuanya;"
+    ],
+    "hari": [],
+    "tanggal": [
+      "6 Mei 2026"
+    ],
+    "tahun": [
+      "2026"
+    ],
+    "siapa_yang_memutus": [
+      "Hakim,"
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "                 Hakim,\nttd\n    Petrus Nico Kristian, S.H.  "
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "terdakwa",
+    "petunjuk_barang_bukti",
+    "hari",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

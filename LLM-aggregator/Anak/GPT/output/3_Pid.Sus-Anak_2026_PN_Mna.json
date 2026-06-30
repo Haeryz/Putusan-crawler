@@ -1,0 +1,93 @@
+{
+  "status": "completed",
+  "source_file": "3_Pid.Sus-Anak_2026_PN_Mna.txt",
+  "source_path": "downloads/kasus anak/raw-text/3_Pid.Sus-Anak_2026_PN_Mna.txt",
+  "source_sha256": "63f4b7e4e2aa6f3d7d84d69113f183ab31992187361709ff83047b6a31bfdab5",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 3/Pid.Sus-Anak/2026/PN Mna"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Majelis Hakim Pengadilan Negeri Manna;"
+    ],
+    "keterangan_perkara": [
+      "Majelis Hakim Pengadilan Negeri Manna;\nMembaca Laporan Pembimbing Kemasyarakatan Nomor WP .8.PAS.5-\nPK.06.04-246 tanggal 13 Mei 2026 tentang pelaksanaan Kesepakatan Diversi\ndalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "ANAK"
+    ],
+    "tempat_lahir": [
+      "Pulau Rimau"
+    ],
+    "umur_tanggal_lahir": [
+      "16 Tahun / 09 November 2009"
+    ],
+    "jenis_kelamin": [
+      "Laki-laki"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "Kabupaten Bengkulu Selatan"
+    ],
+    "agama": [
+      "Islam"
+    ],
+    "pekerjaan": [
+      "Pelajar/mahasiswa"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [
+      "Menimbang, bahwa oleh karena barang bukti dalam perkara ini telah\nditetapkan dalam Penetapan Nomor 2/Pid.Sus-Anak/2026/PN Mna atas nama\nAnak xxx , maka Majelis Hakim tidak menetapkan kembali status barang bukti\ntersebut dalam amar Penetapan ini;"
+    ],
+    "fakta_hukum": [],
+    "pertimbangan_hukum": [
+      "Menimbang,  bahwa  oleh  karena  berdasarkan  Laporan  Pembimbing\nKemasyarakatan  Nomor WP .8.PAS.5-PK.06.04-246  tanggal  13  Mei  2026\nKesepakatan  Diversi  telah  selesai  dilaksanakan,  maka  proses  pemeriksaan\nperkara ANAK harus dihentikan;\nMenimbang, bahwa oleh karena barang bukti dalam perkara ini telah\nditetapkan dalam Penetapan Nomor 2/Pid.Sus-Anak/2026/PN Mna atas nama\nAnak xxx , maka Majelis Hakim tidak menetapkan kembali status barang bukti\ntersebut dalam amar Penetapan ini;\nMemperhatikan Pasal  12  ayat  (3),  ayat  (4),  dan ayat  (5)  Undang-\nUndang Nomor  11 Tahun  2012  tentang Sistem Peradilan Pidana Anak dan\nPasal  59  Peraturan  Pemerintah  Nomor  65  Tahun  2015  tentang  Pedoman\nPelaksanaan  Diversi  dan  Penanganan  Anak  yang  Belum  Berumur  12  (Dua\nBelas) Tahun;"
+    ],
+    "amar_putusan": [
+      "                                       MENETAPKAN\n1. Menghentikan proses pemeriksaan perkara Anak; \n2. Memerintahkan  Panitera  mengirimkan  salinan  penetapan  ini  kepada\nPenuntut Umum dan Anak/Orangtua Anak."
+    ],
+    "hari": [],
+    "tanggal": [
+      "13 Mei 2026"
+    ],
+    "tahun": [
+      "2026"
+    ],
+    "siapa_yang_memutus": [
+      "              Hakim Anggota \n                    Ttd.                       \n             Maimunah, S.H.\n\n                   Ttd. \n             Nurul Fitri, S.H.\n                      Hakim Ketua\n                             Ttd.\nSamuel Fajar Hotmangara Tua Siahaan, S.H."
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "              Hakim Anggota \n                    Ttd.                       \n             Maimunah, S.H.\n\n                   Ttd. \n             Nurul Fitri, S.H.\n                      Hakim Ketua\n                             Ttd.\nSamuel Fajar Hotmangara Tua Siahaan, S.H."
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "fakta_hukum",
+    "hari",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

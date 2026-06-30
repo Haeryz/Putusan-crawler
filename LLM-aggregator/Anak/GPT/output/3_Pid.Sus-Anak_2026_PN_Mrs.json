@@ -1,0 +1,92 @@
+{
+  "status": "completed",
+  "source_file": "3_Pid.Sus-Anak_2026_PN_Mrs.txt",
+  "source_path": "downloads/kasus anak/raw-text/3_Pid.Sus-Anak_2026_PN_Mrs.txt",
+  "source_sha256": "1732cebaac960c183e5885b8a4102e3503be434364fcf0d4f25ab50d9e923293",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 3/Pid.Sus-Anak/2026/PN Mrs"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Pengadilan Negeri Maros;"
+    ],
+    "keterangan_perkara": [
+      "Membaca Laporan Pembimbing Kemasyarakatan tentang pelaksanaan\nKesepakatan Diversi dalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "ANAK"
+    ],
+    "tempat_lahir": [
+      "Makassar"
+    ],
+    "umur_tanggal_lahir": [
+      "17 Tahun / Minggu 07 September 2008"
+    ],
+    "jenis_kelamin": [
+      "Perempuan"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "Kabupaten Maros"
+    ],
+    "agama": [
+      "Islam"
+    ],
+    "pekerjaan": [
+      "Pelajar"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [],
+    "pertimbangan_hukum": [
+      "Menimbang,  bahwa  oleh  karena  berdasarkan  Laporan  Pembimbing\nKemasyarakatan Kesepakatan Diversi telah selesai dilaksanakan, maka proses\npemeriksaan perkara Anak harus dihentikan;\nMemperhatikan  Pasal  12  ayat  (3),  ayat  (4),  dan  ayat  (5)  Undang-\nUndang Nomor 11 Tahun 2012 tentang Sistem Peradilan Pidana Anak."
+    ],
+    "amar_putusan": [
+      "MENETAPKAN\n1. Menghentikan proses pemeriksaan perkara Anak; \n2. Memerintahkan  Panitera  mengirimkan  salinan  penetapan  ini\nkepada Penuntut Umum dan Anak/Orangtua/Wali."
+    ],
+    "hari": [],
+    "tanggal": [
+      "5 Mei 2026"
+    ],
+    "tahun": [
+      "2026"
+    ],
+    "siapa_yang_memutus": [
+      "Rini Ariani Said, S.H., M.H."
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Hakim\nttd.\nRini Ariani Said, S.H., M.H."
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "fakta_hukum",
+    "hari",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

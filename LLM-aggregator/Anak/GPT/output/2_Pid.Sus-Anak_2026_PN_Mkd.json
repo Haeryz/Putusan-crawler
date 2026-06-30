@@ -1,0 +1,93 @@
+{
+  "status": "completed",
+  "source_file": "2_Pid.Sus-Anak_2026_PN_Mkd.txt",
+  "source_path": "downloads/kasus anak/raw-text/2_Pid.Sus-Anak_2026_PN_Mkd.txt",
+  "source_sha256": "8d2b1dcce21f5ecf87d5220a71f12530267c5f756e607a4f7a04caf538d06f61",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 1/Pen.Div/2026/PN Mkd\nJo.\nNomor 2/Pid.Sus-Anak/2026/PN Mkd"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Pengadilan Negeri Mungkid;"
+    ],
+    "keterangan_perkara": [
+      "Membaca  Laporan  Pembimbing  Kemasyarakatan  Nomor\nWP.13.PAS.49-PK.06.04-1113 tanggal  6  April  2026  tentang  Pelaksanaan\nKesepakatan Diversi dalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "ANAK"
+    ],
+    "tempat_lahir": [
+      "Magelang"
+    ],
+    "umur_tanggal_lahir": [
+      "16 Tahun / 2009"
+    ],
+    "jenis_kelamin": [
+      "Laki-laki"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "Kabupaten Magelang"
+    ],
+    "agama": [
+      "Islam"
+    ],
+    "pekerjaan": [
+      "Pelajar/mahasiswa"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [
+      "3. Menetapkan barang bukti berupa:\n- 1 (satu) Bilah Celurit Warna Biru Bergagang Kayu Hitam Dengan\nPanjang 120 cm;\nuntuk dimusnahkan\n- 1 (satu) Buah Handphone Merk Iphone 9 warna hitam dengan IMEI:\n356097094287279 dan terdapat Video saat terjadinya tawuran;\ndikembalikan kepada pemiliknya melalui ANAK, \ndalam  hal  kesepakatan  Diversi  telah  dilaksanakan  seluruhnya  /\nsepenuhnya;"
+    ],
+    "fakta_hukum": [],
+    "pertimbangan_hukum": [
+      "Menimbang,  bahwa  oleh  karena  berdasarkan  Laporan  Pembimbing\nKemasyarakatan  Nomor  WP.13.PAS.49-PK.06.04-1113 tanggal  6  April  2026\nKesepakatan  Diversi  telah  selesai  dilaksanakan,  maka  proses  pemeriksaan\nperkara Anak harus dihentikan;\nMemperhatikan  Pasal  12  ayat  (3),  ayat  (4),  dan  ayat  (5)  Undang-\nUndang Nomor 11 Tahun 2012 tentang Sistem Peradilan Pidana Anak."
+    ],
+    "amar_putusan": [
+      "MENETAPKAN\n1. Menghentikan proses pemeriksaan perkara Anak; \n2. Memerintahkan Anak tersebut dikeluarkan dari tahanan;\n3. Menetapkan barang bukti berupa:\n- 1 (satu) Bilah Celurit Warna Biru Bergagang Kayu Hitam Dengan\nPanjang 120 cm;\nuntuk dimusnahkan\n- 1 (satu) Buah Handphone Merk Iphone 9 warna hitam dengan IMEI:\n356097094287279 dan terdapat Video saat terjadinya tawuran;\ndikembalikan kepada pemiliknya melalui ANAK, \ndalam  hal  kesepakatan  Diversi  telah  dilaksanakan  seluruhnya  /\nsepenuhnya;\n4. Memerintahkan  Panitera  mengirimkan  salinan  penetapan  ini  kepada\nPenuntut Umum dan Anak/Orangtua/Wali."
+    ],
+    "hari": [],
+    "tanggal": [
+      "15 April"
+    ],
+    "tahun": [
+      "2026"
+    ],
+    "siapa_yang_memutus": [
+      "Ditetapkan di Mungkid;\nPada tanggal 15 April 2026\nHakim\nLia Puji Astuti, S.H., M.H."
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Ditetapkan di Mungkid;\nPada tanggal 15 April 2026\nHakim\nLia Puji Astuti, S.H., M.H."
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "fakta_hukum",
+    "hari",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

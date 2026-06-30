@@ -1,0 +1,93 @@
+{
+  "status": "completed",
+  "source_file": "4_Pid.Sus-Anak_2026_PN_Stb.txt",
+  "source_path": "downloads/kasus anak/raw-text/4_Pid.Sus-Anak_2026_PN_Stb.txt",
+  "source_sha256": "aff9aef49c0010eb5add9c0e80485fe987aaea99469e45f4eaba2eb2039cd89b",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 2/Pen.Div/2026/PN Stb\nJo.\nNomor 4/Pid.Sus-Anak/2026/PN Stb"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Majelis Hakim Pengadilan Negeri Stabat;"
+    ],
+    "keterangan_perkara": [
+      "Membaca  Laporan  Pembimbing  Kemasyarakatan  Nomor  tanggal  23\nApril 2026 tentang pelaksanaan Kesepakatan Diversi dalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "Anak Pelaku"
+    ],
+    "tempat_lahir": [
+      "Langkat"
+    ],
+    "umur_tanggal_lahir": [
+      "15 Tahun / Senin 10 Mei 2010"
+    ],
+    "jenis_kelamin": [
+      "Perempuan"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "Tempat tinggal    : Dusun Gn Merlawan, Desa Turangi, Kecamatan\nSalapian, Kabupaten Langkat;  "
+    ],
+    "agama": [
+      "Islam"
+    ],
+    "pekerjaan": [
+      "Pelajar"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [
+      "Menimbang,  bahwa  oleh  karena  berdasarkan  Laporan  Pembimbing\nKemasyarakatan  Nomor  tanggal  23  April  2026  Kesepakatan  Diversi  telah\nselesai dilaksanakan, maka proses pemeriksaan perkara Anak Lolita Balani Br\nBangun harus dihentikan;"
+    ],
+    "pertimbangan_hukum": [
+      "Memperhatikan  Pasal  12  Ayat  (3),  Ayat  (4),  dan  Ayat  (5)  Undang-\nUndang Republik Indonesia Nomor 11 Tahun 2012 Tentang Sistem Peradilan\nPidana Anak;"
+    ],
+    "amar_putusan": [
+      "MENETAPKAN\n1. Menghentikan proses pemeriksaan perkara Anak Pelaku; \n2. Memerintahkan  Panitera  mengirimkan  salinan  penetapan  ini  kepada\nPenuntut Umum dan Anak/Orangtua/Wali."
+    ],
+    "hari": [],
+    "tanggal": [
+      "29 Mei 2026"
+    ],
+    "tahun": [
+      "2026"
+    ],
+    "siapa_yang_memutus": [
+      "Hakim Ketua\nAbraham Van Vollen Hoven Ginting, SH. MH."
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Hakim Ketua\nAbraham Van Vollen Hoven Ginting, SH. MH."
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "hari",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

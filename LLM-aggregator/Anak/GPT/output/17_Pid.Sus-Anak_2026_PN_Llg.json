@@ -1,0 +1,93 @@
+{
+  "status": "completed",
+  "source_file": "17_Pid.Sus-Anak_2026_PN_Llg.txt",
+  "source_path": "downloads/kasus anak/raw-text/17_Pid.Sus-Anak_2026_PN_Llg.txt",
+  "source_sha256": "076905bec0123e121b449cc78cc8e8785c629b23b1d62a63e9725795187c7e64",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 5/Pen.Div/2026/PN Llg\njo.\nNomor 17/Pid.Sus-Anak/2026/PN Llg"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Anak Pengadilan Negeri Lubuk Linggau"
+    ],
+    "keterangan_perkara": [
+      "Membaca Laporan Pembimbing Kemasyarakatan  tentang pelaksanaan\nKesepakatan Diversi dalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "ANAK"
+    ],
+    "tempat_lahir": [
+      "Muara Nilau"
+    ],
+    "umur_tanggal_lahir": [
+      "14 tahun / 12 Maret 2012"
+    ],
+    "jenis_kelamin": [
+      "Perempuan"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "ALAMAT"
+    ],
+    "agama": [
+      "Islam"
+    ],
+    "pekerjaan": [
+      "Pelajar"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [
+      "Menimbang  bahwa  oleh  karena  terhadap  perkara  tersebut  telah\ndilaksanakan  diversi  dengan  hasil  sebagaimana  yang  tertuang  dalam\nkesepakatan diversi, maka proses pemeriksaan perkara Anak harus dihentikan\ndan diperintahkan agar Panitera Pengadilan Negeri Lubuk Linggau mengirimkan\nsalinan penetapan ini kepada Penuntut Umum dan Anak/Orangtua/Wali;"
+    ],
+    "pertimbangan_hukum": [
+      "Mengingat Pasal 8 juncto Pasal 52 Ayat (2) Undang – Undang Nomor\n11 Tahun 2012 tentang Sistem Peradilan Pidana Anak dan Pasal 6 Ayat (5)\nPeraturan Mahkamah Agung Republik Indonesia Nomor 4 Tahun 2014 tentang\nPedoman Pelaksanaan Diversi Dalam Sistem Peradilan Pidana Anak."
+    ],
+    "amar_putusan": [
+      "MENETAPKAN\n1. Menghentikan proses pemeriksaan perkara Anak;\n2. Memerintahkan  Panitera  mengirimkan  salinan  penetapan  ini\nkepada Penuntut Umum dan Anak/Orangtua/Wali."
+    ],
+    "hari": [],
+    "tanggal": [
+      "4 Juni 2026"
+    ],
+    "tahun": [
+      "2026"
+    ],
+    "siapa_yang_memutus": [
+      "Hakim Anak"
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Hakim Anak\nErif Erlangga, S.H"
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "hari",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

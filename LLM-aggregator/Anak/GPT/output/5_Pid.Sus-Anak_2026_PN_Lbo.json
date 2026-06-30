@@ -1,0 +1,93 @@
+{
+  "status": "completed",
+  "source_file": "5_Pid.Sus-Anak_2026_PN_Lbo.txt",
+  "source_path": "downloads/kasus anak/raw-text/5_Pid.Sus-Anak_2026_PN_Lbo.txt",
+  "source_sha256": "7b54b83203169f583319ea4175f359fcc9516ec2262479df504a62fe31900164",
+  "sections": {
+    "judul": [
+      "PENETAPAN "
+    ],
+    "nomor_putusan": [
+      "Nomor 1/Pen.Div/2026/PN Lbo \nJo. \nNomor 5/Pid.Sus-Anak/2026/PN Lbo "
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA "
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Pengadilan Negeri Limboto; "
+    ],
+    "keterangan_perkara": [
+      "Membaca Laporan Pembimbing Kemasyarakatan Nomor  W.26.PAS.2-\nPK.06.03-934 tanggal 26 Mei 2026  tentang laporan pelaksanaan Kesepakatan \nDiversi dalam perkara Anak: "
+    ],
+    "nama_lengkap": [
+      "Anak"
+    ],
+    "tempat_lahir": [
+      "Kab. Gorontalo"
+    ],
+    "umur_tanggal_lahir": [
+      "15 Tahun / Kamis 20 Mei 2010"
+    ],
+    "jenis_kelamin": [
+      "Perempuan"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "Tempat tinggal     : Desa Mongolato, Kecamatan Telaga, Kabupaten \nGorontalo;   "
+    ],
+    "agama": [
+      "Islam"
+    ],
+    "pekerjaan": [
+      "Belum/tidak Bekerja"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [
+      "Menimbang, bahwa oleh karena berdasarkan Laporan Pembimbing \nKemasyarakatan Nomor  W.26.PAS.2-PK.06.03-934 tanggal 26 Mei 2026  \nKesepakatan Diversi telah selesai dilaksanakan, maka proses pemeriksaan perkara \nAnak harus dihentikan; "
+    ],
+    "pertimbangan_hukum": [
+      "Menimbang, bahwa oleh karena berdasarkan Laporan Pembimbing \nKemasyarakatan Nomor  W.26.PAS.2-PK.06.03-934 tanggal 26 Mei 2026  \nKesepakatan Diversi telah selesai dilaksanakan, maka proses pemeriksaan perkara \nAnak harus dihentikan; \nMemperhatikan Pasal 12 ayat (3), ayat (4), dan ayat (5) Undang-Undang \nNomor 11 Tahun 2012 tentang Sistem Peradilan Pidana Anak. "
+    ],
+    "amar_putusan": [
+      "MENETAPKAN \n1. Menghentikan proses pemeriksaan perkara Anak;  \n2. Memerintahkan Panitera mengirimkan salinan penetapan ini kepada Penuntut \nUmum dan Anak/Orangtua/Wali. "
+    ],
+    "hari": [],
+    "tanggal": [
+      "26 Mei 2026"
+    ],
+    "tahun": [
+      "2026"
+    ],
+    "siapa_yang_memutus": [
+      "Hakim \nttd \nIndra Septiana, S.H. "
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Hakim \nttd \nIndra Septiana, S.H. "
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "hari",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}
