@@ -31,7 +31,6 @@ downloads/kasus anak/*
 
 # LLM aggregation runtime state
 LLM-aggregator/Anak/Deepseek/pause
-LLM-aggregator/**/progress.jsonl
 LLM-aggregator/**/logs/
 LLM-aggregator/**/output/
 LLM-aggregator/**/reports/
@@ -42,7 +41,6 @@ LLM-aggregator/**/.spans/
 # repo and resume the Codex run from where it left off. (These override the
 # broad runtime-state ignores above.)
 !LLM-aggregator/TPPO/GPT/progress.jsonl
-!LLM-aggregator/Anak/GPT/progress.jsonl
 !LLM-aggregator/TPPO/GPT/output/
 !LLM-aggregator/TPPO/GPT/output/**
 !LLM-aggregator/Anak/GPT/output/
