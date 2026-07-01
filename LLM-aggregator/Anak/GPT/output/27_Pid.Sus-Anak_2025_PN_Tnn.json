@@ -1,0 +1,92 @@
+{
+  "status": "completed",
+  "source_file": "27_Pid.Sus-Anak_2025_PN_Tnn.txt",
+  "source_path": "downloads/kasus anak/raw-text/27_Pid.Sus-Anak_2025_PN_Tnn.txt",
+  "source_sha256": "9caf3436c289af16b056f2cb3a370355f174e0ae83f7f33acf641f8cf09c0d99",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 7/Pen.Div/2025/PN Tnn\nJo.\nNomor 27/Pid.Sus-Anak/2025/PN Tnn"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Pengadilan Negeri Tondano;"
+    ],
+    "keterangan_perkara": [
+      "Membaca  Laporan  Pembimbing  Kemasyarakatan  Nomor  tanggal  9\nFebruari 2026 tentang pelaksanaan Kesepakatan Diversi dalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "Anak;"
+    ],
+    "tempat_lahir": [
+      "Kawangkoan;"
+    ],
+    "umur_tanggal_lahir": [
+      "17 T ahun /16 April 2007;"
+    ],
+    "jenis_kelamin": [
+      "Laki-laki;"
+    ],
+    "kebangsaan": [
+      "Indonesia;"
+    ],
+    "tempat_tinggal": [
+      "Kabupaten Minahasa;"
+    ],
+    "agama": [
+      "Kristen;"
+    ],
+    "pekerjaan": [
+      "Belum Bekerja;"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [
+      "Menimbang,  bahwa  oleh  karena  berdasarkan  Laporan  Hasil\nPengawasan  Pelaksanaan  Penetapan  Hasil  Diversi/Putusan  Hakim  klien\nPemasyarakatan  a.n.  Anak  oleh  Pembimbing  Kemasyarakatan  Balai\nPemasyarakatan  Kelas  I  Manado  Nomor  surat  pengantar  WP.25.PAS.2-\nPK.06.02-781 tanggal  9  Februari  2026  tentang  Kesepakatan  Diversi  telah\nselesai dilaksanakan, maka proses pemeriksaan perkara Anak harus dihentikan;"
+    ],
+    "pertimbangan_hukum": [
+      "Memperhatikan  Pasal  12  ayat  (3),  ayat  (4),  dan  ayat  (5)  Undang-\nUndang Nomor 11 Tahun 2012 tentang Sistem Peradilan Pidana Anak."
+    ],
+    "amar_putusan": [
+      "MENETAPKAN\n1. Menghentikan proses pemeriksaan perkara Anak; \nHalaman 1 dari 2\n\n2. Memerintahkan  Panitera Pengadilan Negeri Tondano untuk mengirimkan\nsalinan penetapan ini kepada Penuntut Umum dan Anak/Orangtua/Wali."
+    ],
+    "hari": [],
+    "tanggal": [
+      "2 Maret 2025;"
+    ],
+    "tahun": [],
+    "siapa_yang_memutus": [
+      "Hakim\nPURWO WIDODO, S.H.,M.H."
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Hakim\nPURWO WIDODO, S.H.,M.H."
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "hari",
+    "tahun",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

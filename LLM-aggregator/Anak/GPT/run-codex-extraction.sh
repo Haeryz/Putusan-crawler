@@ -18,7 +18,7 @@ FORMAT_GUIDE="SKKMA PDF"
 
 ACTION="Run"
 TARGET=0
-MODEL=""
+MODEL="gpt-5.4-mini"
 MODE="Span"
 REASONING_EFFORT="low"
 DISABLE_MCP=1
@@ -30,6 +30,7 @@ DISABLE_WALL_CLOCK_GUARD=0
 JSON_EVENTS=0
 NO_PAUSE=0
 JOBS=1
+NO_TUI=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -50,6 +51,7 @@ while [ "$#" -gt 0 ]; do
     --json-events|-JsonEvents) JSON_EVENTS=1; shift ;;
     --no-pause|-NoPause) NO_PAUSE=1; shift ;;
     --jobs) JOBS="$2"; shift 2 ;;
+    --no-tui|-NoTui) NO_TUI=1; shift ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -277,5 +279,6 @@ ARGS=(run_extractions.py --corpus "$CORPUS" --target "$TARGET" --reasoning-effor
 [ "$DISABLE_WALL_CLOCK_GUARD" -eq 1 ] && ARGS+=(--disable-wall-clock-guard)
 [ "$JSON_EVENTS" -eq 1 ] && ARGS+=(--json-events)
 [ "$NO_PAUSE" -eq 1 ] && ARGS+=(--no-pause)
+[ "$NO_TUI" -eq 1 ] && ARGS+=(--no-tui)
 
 exec "${PYTHON_CMD[@]}" "${ARGS[@]}"

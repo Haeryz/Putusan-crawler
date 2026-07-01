@@ -1,0 +1,94 @@
+{
+  "status": "completed",
+  "source_file": "10_Pid.Sus-Anak_2025_PN_Ffk.txt",
+  "source_path": "downloads/kasus anak/raw-text/10_Pid.Sus-Anak_2025_PN_Ffk.txt",
+  "source_sha256": "3df4b2824b4d99329acc24c792c4a44059c8ce40cabdbfd7d0c871883fbe7f41",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor xxx/Pid.Sus-Anak/2025/PN Ffk"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Pengadilan Negeri Fak Fak;"
+    ],
+    "keterangan_perkara": [
+      "Membaca  Laporan  Pengawasan  Pelaksanaan  Kesepakatan  Diversi\nyang dibuat di Fakfak, tanggal 9 April 2026 oleh Yustita Damayanti, S.M., selaku\nPembimbing Kemasyarakatan  Pertama pada Balai  Pemasyarakatan Kelas II\nFakfak dalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "ANAK"
+    ],
+    "tempat_lahir": [
+      "Fakfak"
+    ],
+    "umur_tanggal_lahir": [
+      "xxx tahun / xxx"
+    ],
+    "jenis_kelamin": [
+      "xxx"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "Kabupaten Fakfak"
+    ],
+    "agama": [
+      "xxx"
+    ],
+    "pekerjaan": [
+      "xxx"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [
+      "Membaca  Laporan  Pengawasan  Pelaksanaan  Kesepakatan  Diversi\nyang dibuat di Fakfak, tanggal 9 April 2026 oleh Yustita Damayanti, S.M., selaku\nPembimbing Kemasyarakatan  Pertama pada Balai  Pemasyarakatan Kelas II\nFakfak dalam perkara Anak:",
+      "Menimbang,  berdasarkan  Laporan  Pengawasan  Pelaksanaan\nKesepakatan Diversi yang dibuat di Fakfak, tanggal 9 April 2026 oleh Yustita\nDamayanti,  S.M.,  selaku  Pembimbing  Kemasyarakatan  Pertama  pada  Balai\nPemasyarakatan Kelas II Fakfak yang diterima oleh Pengadilan Negeri Fakfak\ntanggal  9  April  2026,  oleh  karena  kesepakatan  Diversi  telah  dilaksanakan\nseluruhnya, maka proses pemeriksaan perkara Anak harus dihentikan;"
+    ],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [],
+    "pertimbangan_hukum": [
+      "Menimbang,  berdasarkan  Laporan  Pengawasan  Pelaksanaan\nKesepakatan Diversi yang dibuat di Fakfak, tanggal 9 April 2026 oleh Yustita\nDamayanti,  S.M.,  selaku  Pembimbing  Kemasyarakatan  Pertama  pada  Balai\nPemasyarakatan Kelas II Fakfak yang diterima oleh Pengadilan Negeri Fakfak\ntanggal  9  April  2026,  oleh  karena  kesepakatan  Diversi  telah  dilaksanakan\nseluruhnya, maka proses pemeriksaan perkara Anak harus dihentikan;\nMemperhatikan  Pasal  12  ayat  (3),  ayat  (4),  dan  ayat  (5)  Undang-\nUndang Nomor 11 Tahun 2012 tentang Sistem Peradilan Pidana Anak, Pasal 59\nPeraturan Pemerintah Nomor 65 Tahun 2015 tentang Pedoman Pelaksanaan\nDiversi dan Penanganan Anak yang Belum Berumur 12 (Dua Belas) Tahun, dan\nperaturan perundang-undangan lain yang berkaitan dengan perkara ini;"
+    ],
+    "amar_putusan": [
+      "MENETAPKAN:\n1. Menghentikan proses pemeriksaan perkara Anak;\n2. Memerintahkan terhadap Anak dikembalikan kepada orang tua;\n3. Memerintahkan Panitera Pengadilan Negeri Fakfak mengirimkan\nsalinan penetapan ini kepada Penuntut Umum paling lama 3 (tiga) hari\nterhitung sejak tanggal penetapan penghentian pemeriksaan perkara;"
+    ],
+    "hari": [],
+    "tanggal": [
+      "10 April 2026"
+    ],
+    "tahun": [
+      "2026"
+    ],
+    "siapa_yang_memutus": [
+      "HAKIM PENGADILAN NEGERI FAKFAK,"
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "HAKIM PENGADILAN NEGERI FAKFAK,\nMAHENDRA WIRASAKTI, S.H."
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "petunjuk_barang_bukti",
+    "fakta_hukum",
+    "hari",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

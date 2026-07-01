@@ -1,0 +1,91 @@
+{
+  "status": "completed",
+  "source_file": "5_Pid.Sus-Anak_2026_PN_Bgl.txt",
+  "source_path": "downloads/kasus anak/raw-text/5_Pid.Sus-Anak_2026_PN_Bgl.txt",
+  "source_sha256": "2ba35cb8dc845d07a796fc08d1d6c9e5917adae6c7d5114743ff33f0e35db5cf",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 6/Pen.Div/2026/PN Bgl"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Pengadilan Negeri Bengkulu;"
+    ],
+    "keterangan_perkara": [
+      "Membaca  Laporan  Pembimbing  Kemasyarakatan  Nomor   tanggal\ntentang pelaksanaan Kesepakatan Diversi dalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "Wahyuda Putra Bin Rigusman"
+    ],
+    "tempat_lahir": [
+      "BENGKULU"
+    ],
+    "umur_tanggal_lahir": [
+      "19 Tahun / Sabtu 12 Agustus 2006"
+    ],
+    "jenis_kelamin": [
+      "Laki-laki"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "Tempat tinggal    : Jalan  Garuda  II  RT  002  RW  001  Kelurahan\nPadang Nangka Kecamatan Singaran Pati Kota\nBengkulu;  "
+    ],
+    "agama": [
+      "Islam"
+    ],
+    "pekerjaan": [
+      "Belum/tidak Bekerja"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [],
+    "pertimbangan_hukum": [
+      "Menimbang,  bahwa  oleh  karena  berdasarkan  Laporan  Pembimbing\nKemasyarakatan  Nomor  tanggal   Kesepakatan  Diversi  telah  selesai\ndilaksanakan,  maka  proses  pemeriksaan  perkara  Anak  Wahyuda  Putra  Bin\nRigusman harus dihentikan;\nMemperhatikan  Pasal 12 ayat  (3), ayat (4), dan ayat (5)  Undang-\nUndang Nomor 11 Tahun 2012 tentang Sistem Peradilan Pidana Anak."
+    ],
+    "amar_putusan": [
+      "MENETAPKAN\n1. Menghentikan proses pemeriksaan perkara Anak Wahyuda Putra\nBin Rigusman; \n2. Memerintahkan Anak tersebut dikeluarkan dari tahanan;\n3. Memerintahkan  Panitera  mengirimkan  salinan  penetapan  ini\nkepada Penuntut Umum dan Anak/Orangtua/Wali."
+    ],
+    "hari": [],
+    "tanggal": [
+      "26 Mei 2026"
+    ],
+    "tahun": [],
+    "siapa_yang_memutus": [
+      "Hakim"
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Hakim\nDto \nMUHAMAD IMAN, SH"
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "fakta_hukum",
+    "hari",
+    "tahun",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

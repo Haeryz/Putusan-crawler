@@ -1,0 +1,92 @@
+{
+  "status": "completed",
+  "source_file": "2_Pid.Sus-Anak_2026_PN_Klt.txt",
+  "source_path": "downloads/kasus anak/raw-text/2_Pid.Sus-Anak_2026_PN_Klt.txt",
+  "source_sha256": "85d337f6a1750b0881528555f8de4bdbc00fa5a5dbbb249b530eb2d2b8e4af1e",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 1/Pen.Div/2026/PN Klt \nJo \nNomor 2/Pid.Sus-Anak/2026/PN Klt "
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Pengadilan Negeri Kuala Tungkal;"
+    ],
+    "keterangan_perkara": [
+      "Membaca Laporan Pembimbing Kemasyarakatan  Nomor : \nWP.5.PAS.8.PK.06.02-1090 tanggal 16 April 2026  tentang Laporan Hasil \nPengawasan Pelaksanaan Kesepakatan Diversi dalam perkara Anak: "
+    ],
+    "nama_lengkap": [
+      "ANAK;"
+    ],
+    "tempat_lahir": [
+      "Kuala Tungkal;"
+    ],
+    "umur_tanggal_lahir": [
+      "16 Tahun / 19 Juli 2009;"
+    ],
+    "jenis_kelamin": [
+      "Laki-laki;"
+    ],
+    "kebangsaan": [
+      "Indonesia;"
+    ],
+    "tempat_tinggal": [
+      "Kabupaten Tanjung Jabung Barat;"
+    ],
+    "agama": [
+      "Islam;"
+    ],
+    "pekerjaan": [
+      "Tidak Bekerja;"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [
+      "Menimbang bahwa oleh karena berdasa rkan Laporan Pembimbing \nKemasyarakatan Nomor: W WP.5.PAS.8.PK.06.02-1090 tanggal 16 April 2026 , \nKesepakatan Diversi telah selesai dilaksanakan, maka proses pemeriksaan \nperkara Anak Rokhan Erlinto als Rohan bin Warsito harus dihentikan; "
+    ],
+    "pertimbangan_hukum": [
+      "Memperhatikan Pasal 12 ayat (3), ayat (4), dan ayat (5) Undang-Undang \nNomor 11 Tahun 2012 tentang Sistem Peradilan Pidana Anak  dan Pasal 59 \nPeraturan Pemerintah Nomor 65 Tahun 2015 tentang Pedoman Pelaksanaan \nDiversi dan Penanganan Anak Yang Belum Berumur 12 (Dua Belas) Tahun. "
+    ],
+    "amar_putusan": [
+      "MENETAPKAN: \n1. Menghentikan proses pemeriksaan perkara Anak;  \n2. Memerintahkan Panitera mengirimkan salinan penetapan ini kepada  Penuntut \nUmum dan Anak/Orangtua/Wali; "
+    ],
+    "hari": [],
+    "tanggal": [
+      "16 April 2026"
+    ],
+    "tahun": [
+      "2026"
+    ],
+    "siapa_yang_memutus": [],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Hakim, \n\ndto. \n\nFalih Fakhri Fadhlillah, S.H. "
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "hari",
+    "siapa_yang_memutus",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

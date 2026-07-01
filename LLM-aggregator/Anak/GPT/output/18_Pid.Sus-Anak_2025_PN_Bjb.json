@@ -1,0 +1,93 @@
+{
+  "status": "completed",
+  "source_file": "18_Pid.Sus-Anak_2025_PN_Bjb.txt",
+  "source_path": "downloads/kasus anak/raw-text/18_Pid.Sus-Anak_2025_PN_Bjb.txt",
+  "source_sha256": "710a81e103f565a3e895215f01a09d9c471b523ee2057c7ac8daa1939cbce86d",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 2/Pen.Div/2025/PN Bjb\nJo.\nNomor 18/Pid.Sus-Anak/2025/PN Bjb"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Pengadilan Negeri Banjarbaru;"
+    ],
+    "keterangan_perkara": [
+      "Membaca Laporan Pembimbing Kemasyarakatan tanggal 25 November\n2025 tentang pelaksanaan Kesepakatan Diversi dalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "ANAK"
+    ],
+    "tempat_lahir": [
+      "Hulu Sungai Tengah"
+    ],
+    "umur_tanggal_lahir": [
+      "17 tahun/2009"
+    ],
+    "jenis_kelamin": [
+      "Laki-laki"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "Kota Banjarbaru"
+    ],
+    "agama": [
+      "Islam"
+    ],
+    "pekerjaan": [
+      "Pelajar/mahasiswa"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [],
+    "pertimbangan_hukum": [
+      "Menimbang  bahwa  oleh  karena  berdasarkan  Laporan  Pembimbing\nKemasyarakatan tanggal 25 November 2025 Kesepakatan Diversi telah selesai\ndilaksanakan, maka proses pemeriksaan perkara Anak harus dihentikan;\nMemperhatikan  Pasal  12  ayat  (3),  ayat  (4),  dan  ayat  (5)  Undang-\nUndang Nomor 11 Tahun 2012 tentang Sistem Peradilan Pidana Anak."
+    ],
+    "amar_putusan": [
+      "MENETAPKAN\n1. Menghentikan proses pemeriksaan perkara Anak; \n2. Memerintahkan  Panitera  mengirimkan  salinan  penetapan  ini\nkepada Penuntut Umum, Anak, dan Orangtua Anak."
+    ],
+    "hari": [
+      "3"
+    ],
+    "tanggal": [
+      "Juni"
+    ],
+    "tahun": [
+      "2026"
+    ],
+    "siapa_yang_memutus": [
+      "Hakim\n                 ttd.\nNoorila Ulfa Nafisah, S.H."
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Hakim\n                 ttd.\nNoorila Ulfa Nafisah, S.H."
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "fakta_hukum",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

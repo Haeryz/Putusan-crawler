@@ -1,0 +1,93 @@
+{
+  "status": "completed",
+  "source_file": "2_Pid.Sus-Anak_2018_PN_Unh.txt",
+  "source_path": "downloads/kasus anak/raw-text/2_Pid.Sus-Anak_2018_PN_Unh.txt",
+  "source_sha256": "3b49d9f915b418dadf31ce6816911b812d0076676ce6a811eeb3b1452fba7901",
+  "sections": {
+    "judul": [
+      "P E N E T A P A N"
+    ],
+    "nomor_putusan": [
+      "2/Pid.Sus-Anak/2018/PN Unh"
+    ],
+    "irah_irah": [
+      "“DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA”"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Pengadilan Negeri Unaaha"
+    ],
+    "keterangan_perkara": [
+      "         Telah membaca Berita Acara Diversi pada hari  Rabu, tanggal 24 Januari  dalam \nperkara Nomor  2/Pid.Sus-Anak/2018/PN Unh, atas nama Terdakwa  : Laode Fadhil \nZulfahmi Alias Fadhil tempat lahir di Kendari pada tanggal 14 Juni 2000, umur 17 Tahun, \nPelajar, tempat tinggal di Dusun 3  Desa Andumowu, Kecamatan Lasolo, Kabupaten \nKonawe Utara; ------------------------------------------------------------------------------------------ "
+    ],
+    "nama_lengkap": [
+      "Laode Fadhil Zulfahmi Alias Fadhil"
+    ],
+    "tempat_lahir": [
+      "Kendari"
+    ],
+    "umur_tanggal_lahir": [
+      "14 Juni 2000, umur 17 Tahun"
+    ],
+    "jenis_kelamin": [],
+    "kebangsaan": [],
+    "tempat_tinggal": [
+      "Di Dusun 3  Desa Andumowu, Kecamatan Lasolo, Kabupaten Konawe Utara"
+    ],
+    "agama": [],
+    "pekerjaan": [
+      "Pelajar"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [
+      "Menimbang, bahwa Terdakwa telah didakwa melakukan tindak pidana sebagaimana \ndiatur dalam da kwaan kesatu Pasal 80 Ayat (1) Jo Pasal 76C UU No. 35 Tahun 2014  \nTentang Perubahan atas UU No. 23 Tahun 2002 Tentang Perlindungan atau kedua Pasal \n351 ayat (1) KUHP; ------------------------------------------------------------------------------------ "
+    ],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [
+      "Menimbang, bahwa perkara atas nama T erdakwa Laode Fadhil Zulfahmi Alias \nFadhil dalam tahap Diversi; --------------------------------------------------------------------------- \n\nMenimbang, musyawarah Diversi  pada hari Rabu tanggal 24 Januari 2018  telah \nberhasil dilakukan yang tertuang dalam Kesepakatan Diversi; ---------------------------------- "
+    ],
+    "pertimbangan_hukum": [
+      "Memperhatikan,  Pasal 6 ayat (5)  PERMA Nomor 4 Tahun 2014 tentang Pedoman \nPelaksanaan Diversi dalam Sistem Peradilan Anak; ---------------------------------------------- ",
+      "M E N E T A P K A N : \n\n      Menyatakan penghentian pemeriksaan perkara Nomor 2/Pid.Sus-Anak/2018/PN Unh \natas nama Anak, tersebut diatas oleh karena proses Diversi telah berhasil; --------------------"
+    ],
+    "amar_putusan": [
+      "M E N E T A P K A N : \n\n      Menyatakan penghentian pemeriksaan perkara Nomor 2/Pid.Sus-Anak/2018/PN Unh \natas nama Anak, tersebut diatas oleh karena proses Diversi telah berhasil; --------------------"
+    ],
+    "hari": [
+      "Rabu"
+    ],
+    "tanggal": [
+      "24 Januari 2018"
+    ],
+    "tahun": [
+      "2018"
+    ],
+    "siapa_yang_memutus": [
+      "Hakim Pengadilan Negeri Unaaha"
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "              Hakim  \n\n          Lely Salempang, S.H.,M.H. "
+    ]
+  },
+  "empty_sections": [
+    "jenis_kelamin",
+    "kebangsaan",
+    "agama",
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

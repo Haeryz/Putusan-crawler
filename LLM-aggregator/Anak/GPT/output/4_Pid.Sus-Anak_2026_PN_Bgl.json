@@ -1,0 +1,98 @@
+{
+  "status": "completed",
+  "source_file": "4_Pid.Sus-Anak_2026_PN_Bgl.txt",
+  "source_path": "downloads/kasus anak/raw-text/4_Pid.Sus-Anak_2026_PN_Bgl.txt",
+  "source_sha256": "cc3fd844e63da56c57531f15b56c97b6e8ed0b246abc3cbb2bd5baed21fa4bad",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor ……../Pid.Sus-Anak/2026/PN Bgl"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Pengadilan Negeri Bengkulu."
+    ],
+    "keterangan_perkara": [
+      "Membaca Surat Kesepakatan Diversi dalam perkara Anak :"
+    ],
+    "nama_lengkap": [
+      "Anak .",
+      "anak."
+    ],
+    "tempat_lahir": [
+      "Bengkulu.",
+      "Bengkulu."
+    ],
+    "umur_tanggal_lahir": [
+      "16 Tahun/ 9 Nopember  2009.",
+      "16 Tahun/ 10 Januari 2010."
+    ],
+    "jenis_kelamin": [
+      "Perempuan.",
+      "Perempuan."
+    ],
+    "kebangsaan": [
+      "Indonesia.",
+      "Indonesia."
+    ],
+    "tempat_tinggal": [
+      ".Kepahiang.",
+      "Bengkulu."
+    ],
+    "agama": [
+      "Islam.",
+      "Islam."
+    ],
+    "pekerjaan": [
+      "Pelajar.",
+      "Pelajar."
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [],
+    "pertimbangan_hukum": [
+      "Menimbang,  bahwa  oleh  karena  berdasarkan  Laporan  Pembimbing\nKemasyarakatan  Nomor  Register  Litmas  :  0055/A.N/II/2026,  kesepakatan  diversi\ntelah selesai dilaksanakan, maka proses pemeriksaan para Anak harus dihentikan;\nMemperhatikan  Pasal  12  ayat  (3),  ayat  (4),  dan  ayat  (5)  Undang-Undang\nNomor 11 Tahun 2012 tentang Sistem Peradilan Pidana Anak;"
+    ],
+    "amar_putusan": [
+      "MENETAPKAN:\n1. Menghentikan proses pemeriksaan perkara para  Anak;\n2. Memerintahkan  Panitera  mengirimkan  salinan  penetapan  ini  kepada\nPenuntut Umum dan Anak/ Orangtua/ Wali;"
+    ],
+    "hari": [],
+    "tanggal": [],
+    "tahun": [],
+    "siapa_yang_memutus": [
+      "Hakim\nDto\nFERI DELIANSYAH, S.H."
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Hakim\nDto\nFERI DELIANSYAH, S.H."
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "fakta_hukum",
+    "hari",
+    "tanggal",
+    "tahun",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

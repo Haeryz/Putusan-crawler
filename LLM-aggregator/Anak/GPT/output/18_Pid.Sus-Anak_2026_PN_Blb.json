@@ -1,0 +1,81 @@
+{
+  "status": "completed",
+  "source_file": "18_Pid.Sus-Anak_2026_PN_Blb.txt",
+  "source_path": "downloads/kasus anak/raw-text/18_Pid.Sus-Anak_2026_PN_Blb.txt",
+  "source_sha256": "cd1cb05c940fda7f9cd86701388f87009b7b863f0f7f0be33c2e49f38bd4340e",
+  "sections": {
+    "judul": [
+      "P E N E T A P A N"
+    ],
+    "nomor_putusan": [
+      "18/Pid.Sus-Anak/2026/PN Blb"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Ketua Pengadilan Negeri Bale Bandung;"
+    ],
+    "keterangan_perkara": [
+      "Setelah membaca: \n1. Laporan dari Hakim pemeriksa perkara Nomor: 18/Pid.Sus-Anak/2026/PN Blb tanggal 6 \nMei 2026 perihal Laporan Hasil Diversi dalam perkara para Anak: \no I. Anak I, lahir di Bandung, tanggal 26 Januari 2011, Agama Islam, Pekerjaan Pelajar; \no II. Anak II, lahir di Bandung, tanggal 20 Mei 2012, Agama Islam, Pekerjaan Pelajar; \no III. Anak III, lahir di Bandung, tanggal 18 Juli 2012, Agama Islam, Pekerjaan Pelajar; \n2. Berita Acara Diversi Nomor: 18/Pid.Sus-Anak/2026/PN Blb tanggal 6 Mei 2026; \n3. Kesepakatan Diversi tanggal 6 Mei 2026; "
+    ],
+    "nama_lengkap": [],
+    "tempat_lahir": [],
+    "umur_tanggal_lahir": [],
+    "jenis_kelamin": [],
+    "kebangsaan": [],
+    "tempat_tinggal": [],
+    "agama": [],
+    "pekerjaan": [],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [],
+    "pertimbangan_hukum": [
+      "Menimbang, bahwa dari Laporan Hakim pemeriksa dan Berita Acara Diversi tersebut, \nternyata antara Para Pelaku Anak dan Anak Korban telah tercapai kesepakatan Diversi \npada tanggal 6 Mei 2026 yang pada pokoknya para pihak sepakat untuk mengakhiri \npermasalahan terkait tindak pidana pencabulan (LP Nomor: \nLP/B/716/XI/2025/SPKT/POLRESTA BANDUNG), dengan ketentuan: \n1. Penyelesaian Kekeluargaan: Para orang tua Anak mengakui kekhilafan dan meminta \nmaaf kepada Pihak Korban, yang diterima dengan tulus. \n2. Biaya Pengobatan dan Kerohiman: Para orang tua Anak secara bersama -sama \nmemberikan biaya pengobatan dan uang kerohiman sebesar Rp15.000.000,00 (Lima \nbelas juta rupiah) yang telah dibayarkan secara tunai. \n3. Pencabutan Laporan: Pihak Korban bersedia mencabut laporan agar perkara \ndihentikan demi masa depan para Anak. \n4. Bebas Tuntutan: Permasalahan dianggap selesai secara tuntas baik secara Pidana \nmaupun Perdata. \nMenimbang, bahwa kesepakatan diversi tersebut telah memenuhi syarat dan tidak \nbertentangan dengan peraturan perundang-undangan; \n\nMemperhatikan Pasal 12, Pasal 52 ayat 5 UU Nomor 11 Tahun 2012 tentang Sistem \nPeradilan Pidana Anak dan peraturan perundang-undangan lain yang bersangkutan; "
+    ],
+    "amar_putusan": [
+      "MENETAPKAN \n1. Mengabulkan Permohonan Hakim tersebut; \n2. Memerintahkan para pihak untuk melaksanakan kesepakatan diversi; \n3. Menghentikan proses pemeriksaan perkara Nomor 18/Pid.Sus -Anak/2026/PN Blb \nterhadap para Anak tersebut; \n4. Memerintahkan agar Anak I dikeluarkan dari tahanan LPKA Kelas II Bandung, serta \nAnak II dan Anak III dikeluarkan dari Lembaga Penyelenggara Kesejahteraan Sosial \n(LPKS); \n5. Memerintahkan pengadilan untuk bertanggung jawab atas barang bukti sampai \nKesepakatan Diversi dilaksanakan sepenuhnya; \n6. Menetapkan barang bukti berupa pakaian dan perlengkapan milik korban dikembalikan \nkepada Anak Korban setelah kesepakatan dilaksanakan; \n7. Memerintahkan Panitera menyampaikan salinan penetapan ini kepada Penuntut Umum, \nPembimbing Kemasyarakatan, Anak/Orang tua, dan Tokoh Masyarakat. "
+    ],
+    "hari": [],
+    "tanggal": [],
+    "tahun": [],
+    "siapa_yang_memutus": [],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Ditetapkan di Bale Bandung \nPada tanggal, 6 Mei 2026 \n\nKetua Pengadilan Negeri Bale Bandung \nTtd. \n\nRENDRA YOZAR DHARMA PUTRA, S.H., M.H. "
+    ]
+  },
+  "empty_sections": [
+    "nama_lengkap",
+    "tempat_lahir",
+    "umur_tanggal_lahir",
+    "jenis_kelamin",
+    "kebangsaan",
+    "tempat_tinggal",
+    "agama",
+    "pekerjaan",
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "fakta_hukum",
+    "hari",
+    "tanggal",
+    "tahun",
+    "siapa_yang_memutus",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

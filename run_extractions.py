@@ -28,10 +28,33 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from time import monotonic
 from pathlib import Path
+
+# Rich powers the live dashboard, matching the DeepSeek/Qwen aggregators. It is
+# optional: when it is missing (or --no-tui is passed, or stdout is not a TTY)
+# the runner falls back to the same line-oriented output it always printed.
+try:
+    from rich.console import Console, Group
+    from rich.live import Live
+    from rich.markup import escape
+    from rich.panel import Panel
+    from rich.progress import (
+        BarColumn,
+        MofNCompleteColumn,
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+        TimeElapsedColumn,
+    )
+    from rich.table import Table
+
+    _RICH_AVAILABLE = True
+except ImportError:  # pragma: no cover - rich is a declared dependency
+    _RICH_AVAILABLE = False
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -125,11 +148,46 @@ def init_codex_no_mcp_home() -> Path | None:
     for name in ("auth.json", "installation_id", "version.json"):
         src = real_home / name
         if src.exists():
-            shutil.copy2(src, alt_home / name)
+            _resilient_copy(src, alt_home / name)
 
     if not (alt_home / "auth.json").exists():
         print(f"[warn] auth.json not found in {real_home}; MCP-disabled home may not be authenticated.")
     return alt_home
+
+
+def _resilient_copy(src: Path, dst: Path) -> None:
+    """Copy ``src`` to ``dst``, tolerating Windows file locks.
+
+    ``shutil.copy2`` uses ``CopyFile2``, which raises ``WinError 32`` when Codex
+    (or a parallel extraction run) holds ``auth.json``/``version.json`` open.
+    We instead read the source with shared-read access and atomically replace
+    the destination via a temp file. If every attempt fails we keep any existing
+    copy and warn instead of aborting the whole run.
+    """
+    from time import sleep
+
+    last_exc: Exception | None = None
+    for attempt in range(5):
+        try:
+            with open(src, "rb") as fh:
+                data = fh.read()
+            tmp = dst.with_suffix(dst.suffix + f".tmp{os.getpid()}")
+            with open(tmp, "wb") as out:
+                out.write(data)
+            os.replace(tmp, dst)
+            try:
+                shutil.copystat(src, dst)
+            except OSError:
+                pass  # metadata is non-essential
+            return
+        except OSError as exc:
+            last_exc = exc
+            sleep(0.2 * (attempt + 1))
+
+    if dst.exists():
+        print(f"[warn] {src.name} is locked ({last_exc}); reusing the existing copy in the MCP-disabled home.")
+    else:
+        print(f"[warn] Could not copy {src.name} into the MCP-disabled home ({last_exc}).")
 
 
 def codex_args(model: str, reasoning: str, json_events: bool) -> list[str]:
@@ -242,6 +300,7 @@ def codex_usage_from_logs() -> dict | None:
         return None
 
     marker = "websocket event: "
+    decoder = json.JSONDecoder()
     event = None
     event_ts = 0
     for ts, body in rows:
@@ -249,32 +308,66 @@ def codex_usage_from_logs() -> dict | None:
         if idx < 0:
             continue
         try:
-            candidate = json.loads(body[idx + len(marker):].strip())
-        except json.JSONDecodeError:
+            # raw_decode stops at the end of the JSON object and ignores any
+            # trailing log text, which json.loads would choke on.
+            candidate, _ = decoder.raw_decode(body[idx + len(marker):].strip())
+        except (json.JSONDecodeError, ValueError):
             continue
-        primary = candidate.get("rate_limits", {}).get("primary", {})
-        if candidate.get("type") == "codex.rate_limits" and "used_percent" in primary:
+        if candidate.get("type") == "codex.rate_limits" and candidate.get("rate_limits"):
             event = candidate
             event_ts = ts
             break
     if event is None:
         return None
 
-    primary = event["rate_limits"]["primary"]
-    used = int(primary["used_percent"])
+    bucket = _pick_5h_bucket(event["rate_limits"])
+    if not bucket or "used_percent" not in bucket:
+        return None
+
+    now = int(datetime.now().timestamp())
+    age = now - int(event_ts)
+    reset_at = int(bucket["reset_at"]) if bucket.get("reset_at") else 0
+    window_seconds = int(bucket.get("window_minutes", 300)) * 60
+    # A snapshot only describes its own window. Once that window has reset (or
+    # the event is simply old), the cached used_percent no longer matches what
+    # `codex` reports live, so fall through to a fresh source instead of showing
+    # a misleading number. During an active run, every Codex call writes a new
+    # event, so this guard only affects an idle/first-run display.
+    if reset_at and now >= reset_at:
+        return None
+    if age > max(window_seconds, 3600):
+        return None
+
+    used = int(bucket["used_percent"])
     left = max(0, 100 - used)
     reset = ""
-    if primary.get("reset_at"):
-        reset = datetime.fromtimestamp(int(primary["reset_at"])).strftime("%H:%M on %d %b")
-    elif primary.get("reset_after_seconds"):
-        reset = f"in {int((int(primary['reset_after_seconds']) + 59) / 60)} min"
+    if reset_at:
+        reset = datetime.fromtimestamp(reset_at).strftime("%H:%M on %d %b")
+    elif bucket.get("reset_after_seconds"):
+        reset = f"in {int((int(bucket['reset_after_seconds']) + 59) / 60)} min"
     return {
         "percent_left": left,
         "reset": reset,
         "source": str(logs_db),
         "raw_line": f"5h limit: {left}% left ({used}% used)",
-        "event_age_seconds": int(datetime.now().timestamp()) - int(event_ts),
+        "event_age_seconds": age,
     }
+
+
+def _pick_5h_bucket(rate_limits: dict) -> dict | None:
+    """Return the ~5-hour rate-limit bucket without assuming it is 'primary'.
+
+    Codex reports a ``primary`` and ``secondary`` bucket; the 5-hour window is
+    the one whose ``window_minutes`` is ~300 (the other is the weekly ~10080).
+    Selecting by window size keeps this correct if the ordering ever changes.
+    """
+    buckets = [
+        b for b in (rate_limits.get("primary"), rate_limits.get("secondary"))
+        if isinstance(b, dict) and "used_percent" in b
+    ]
+    if not buckets:
+        return None
+    return min(buckets, key=lambda b: abs(int(b.get("window_minutes", 300)) - 300))
 
 
 def usage_allows_start(codex: str, env: dict, stop_percent: int, status_file: str = "") -> tuple[bool, dict | None, str]:
@@ -460,6 +553,228 @@ def codex_logged(codex: str, args: list[str], env: dict, prompt: str, out_log: P
 
 
 # --------------------------------------------------------------------------- #
+# Live dashboard (mirrors the DeepSeek/Qwen aggregator TUI)
+# --------------------------------------------------------------------------- #
+class CodexDashboard:
+    """Rich live dashboard for the Codex span-extraction loop.
+
+    Layout matches the DeepSeek/Qwen aggregator dashboards: a summary panel, a
+    batch progress bar, an "Active sessions" table, and a "Recent events" table.
+    When disabled (``--no-tui``, no TTY, or rich unavailable) every update falls
+    through to the same line-oriented prints the runner used before.
+    """
+
+    def __init__(
+        self,
+        *,
+        corpus_label: str,
+        total_sources: int,
+        initial_completed: int,
+        selected: int,
+        reasoning: str,
+        model: str,
+        mode: str,
+        usage_percent: int | None,
+        usage_reset: str = "",
+        enabled: bool,
+    ) -> None:
+        self.corpus_label = corpus_label
+        self.total_sources = total_sources
+        self.completed = initial_completed
+        self.selected = max(selected, 0)
+        self.reasoning = reasoning or "default"
+        self.model = model or "(codex default)"
+        self.mode = mode
+        self.usage_percent = usage_percent
+        self.usage_reset = usage_reset
+        self.processed = 0
+        self.failed = 0
+        # source_name -> (stage, started_at, stage_started_at, detail)
+        self.active: dict[str, tuple[str, float, float, str]] = {}
+        self.recent: deque[tuple[str, str]] = deque(maxlen=7)
+        self.enabled = enabled and _RICH_AVAILABLE
+        self.console = Console() if self.enabled else None
+        if self.enabled:
+            self.progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[bold cyan]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TimeElapsedColumn(),
+                expand=True,
+            )
+            self.task_id = self.progress.add_task("Batch", total=max(self.selected, 1))
+            self.live = Live(
+                self.render(),
+                console=self.console,
+                refresh_per_second=4,
+                transient=False,
+                auto_refresh=True,
+            )
+        else:
+            self.live = None
+
+    def __enter__(self) -> "CodexDashboard":
+        if self.live:
+            self.live.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self.live:
+            self.live.update(self.render(), refresh=True)
+            self.live.stop()
+
+    # -- updates -----------------------------------------------------------
+    def log(self, status: str, message: str) -> None:
+        self.recent.appendleft((status, message))
+        if self.live:
+            self.live.update(self.render())
+        else:
+            print(f"  [{status}] {message}")
+
+    def note(self, message: str) -> None:
+        """A line that should appear above the dashboard / in plain output."""
+        if self.console:
+            self.console.print(message)
+        else:
+            print(message)
+
+    def set_usage(self, percent: int | None, reset: str = "") -> None:
+        self.usage_percent = percent
+        self.usage_reset = reset
+        self._refresh()
+
+    def stage(self, source_name: str, stage: str, detail: str = "") -> None:
+        now = monotonic()
+        existing = self.active.get(source_name)
+        started = existing[1] if existing else now
+        self.active[source_name] = (stage, started, now, detail)
+        self._refresh()
+
+    def session_done(
+        self,
+        source_name: str,
+        *,
+        success: bool,
+        empty_count: int | None = None,
+        error: str = "",
+        new_completion: bool = True,
+    ) -> None:
+        self.active.pop(source_name, None)
+        self.processed += 1
+        if self.live:
+            self.progress.update(self.task_id, advance=1)
+        if success:
+            if new_completion:
+                self.completed += 1
+            empties = "?" if empty_count is None else empty_count
+            self.log("OK", f"{source_name}; empty sections={empties}")
+        else:
+            self.failed += 1
+            self.log("FAILED", f"{source_name}: {error}")
+
+    def _refresh(self) -> None:
+        if self.live:
+            self.live.update(self.render(), refresh=True)
+
+    # -- rendering ---------------------------------------------------------
+    def render(self) -> "Group":
+        summary = Table.grid(expand=True)
+        summary.add_column()
+        summary.add_column(justify="right")
+        summary.add_row(
+            "Corpus",
+            f"[bold green]{self.completed}[/] / {self.total_sources} complete",
+        )
+        summary.add_row(
+            "Batch",
+            f"{self.processed} / {self.selected} finished, "
+            f"[red]{self.failed} failed[/]",
+        )
+        if self.usage_percent is None:
+            usage_text = "[dim]unavailable[/]"
+        else:
+            color = "green" if self.usage_percent >= 25 else "yellow" if self.usage_percent >= 10 else "red"
+            usage_text = f"[{color}]{self.usage_percent}% left[/]"
+            if self.usage_reset:
+                usage_text += f" [dim](resets {escape(self.usage_reset)})[/]"
+        summary.add_row("5h usage", usage_text)
+        summary.add_row("Model", f"[cyan]{escape(self.model)}[/]")
+        reasoning_style = "dim" if self.reasoning in ("off", "default") else "magenta"
+        summary.add_row("Reasoning", f"[{reasoning_style}]{self.reasoning}[/]")
+        summary.add_row("Execution", self.mode)
+
+        active = Table(title="Active sessions", expand=True)
+        active.add_column("File")
+        active.add_column("Stage", width=22)
+        active.add_column("Elapsed", justify="right", width=9)
+        active.add_column("Detail")
+        if self.active:
+            now = monotonic()
+            for name, (stage, started, stage_started, detail) in self.active.items():
+                elapsed = int(now - started)
+                stage_elapsed = int(now - stage_started)
+                detail_text = escape(detail) if detail else ""
+                active.add_row(
+                    escape(name),
+                    escape(stage),
+                    f"{elapsed}s",
+                    f"{detail_text} [dim]({stage_elapsed}s in stage)[/]",
+                )
+        else:
+            active.add_row("[dim]None[/]", "", "", "")
+
+        recent = Table(title="Recent events", expand=True)
+        recent.add_column("Status", width=12)
+        recent.add_column("Details")
+        if self.recent:
+            for status, message in self.recent:
+                recent.add_row(status, escape(message))
+        else:
+            recent.add_row("[dim]Starting[/]", "")
+
+        return Group(
+            Panel(summary, title=f"Codex {self.corpus_label} extraction"),
+            self.progress,
+            active,
+            recent,
+        )
+
+
+def _empty_count_from_summary(summary: str) -> int | None:
+    """Best-effort empty-section count from an expand checkpoint line."""
+    try:
+        return len(json.loads(summary).get("empty_sections", []))
+    except Exception:  # noqa: BLE001 - telemetry only
+        return None
+
+
+def run_codex_session(
+    codex: str,
+    args: list[str],
+    env: dict,
+    prompt: str,
+    *,
+    logged: bool,
+    logs_dir: Path,
+    stamp: str,
+    idx: int,
+) -> int:
+    """Run one Codex session, capturing output to logs when the TUI is live.
+
+    Streaming Codex's own stdout would corrupt the Rich live region, so while
+    the dashboard is on we redirect it to the per-session log files (same place
+    the parallel path writes them). With the TUI off we inherit the terminal so
+    Codex's native progress stays visible, exactly as before.
+    """
+    if logged:
+        out_log = logs_dir / f"codex-span-{stamp}-{idx}.stdout.log"
+        err_log = logs_dir / f"codex-span-{stamp}-{idx}.stderr.log"
+        return codex_logged(codex, args, env, prompt, out_log, err_log)
+    return codex_live(codex, args, env, prompt)
+
+
+# --------------------------------------------------------------------------- #
 # Corpus runner
 # --------------------------------------------------------------------------- #
 def show_status(cfg: dict) -> None:
@@ -478,11 +793,13 @@ def show_status(cfg: dict) -> None:
 def run_corpus(cfg: dict, codex: str, args: list[str], env: dict, target: int,
                pause: str, jobs: int, usage_stop_percent: int,
                usage_status_file: str, disable_usage_guard: bool,
-               max_run_minutes: int, disable_wall_clock_guard: bool) -> int:
+               max_run_minutes: int, disable_wall_clock_guard: bool,
+               reasoning: str = "", model: str = "", no_tui: bool = False) -> int:
     for sub in ("out_dir", "reports_dir", "logs_dir", "spans_dir"):
         (REPO_ROOT / cfg[sub]).mkdir(parents=True, exist_ok=True)
     progress_path = REPO_ROOT / cfg["progress"]
     progress_path.touch(exist_ok=True)
+    logs_dir = REPO_ROOT / cfg["logs_dir"]
 
     all_pending = pending_sources(cfg)
     pending = all_pending if target == 0 else all_pending[:target]
@@ -499,103 +816,153 @@ def run_corpus(cfg: dict, codex: str, args: list[str], env: dict, target: int,
     last_source = ""
     started = monotonic()
 
+    in_dir = REPO_ROOT / cfg["input_dir"]
+    total_sources = len(list(in_dir.glob("*.txt"))) if in_dir.exists() else len(pending)
+    initial_completed = len(completed_set(progress_path))
     guarded_parallel = disable_usage_guard and jobs > 1 and len(pending) > 1
-    if guarded_parallel:
-        print(f"  Execution: parallel (up to {jobs} Codex sessions)")
-        prepared = [prepare(cfg, s, pause) for s in pending]
-        logs_dir = REPO_ROOT / cfg["logs_dir"]
+    mode = f"parallel (up to {jobs} sessions)" if guarded_parallel else "sequential"
+    # The Rich live dashboard owns the terminal region, so only enable it on a
+    # real interactive TTY. Redirected/piped runs and --no-tui fall back to the
+    # plain line-oriented output (and let Codex stream its own progress).
+    tui_enabled = (not no_tui) and _RICH_AVAILABLE and sys.stdout.isatty()
+    initial_usage = None
+    initial_reset = ""
+    if not disable_usage_guard:
+        status0 = codex_usage_status(codex, env, usage_status_file)
+        if status0:
+            initial_usage = status0.get("percent_left")
+            initial_reset = status0.get("reset", "")
 
-        def launch(item: tuple[int, dict]) -> tuple[dict, int]:
-            i, p = item
-            out_log = logs_dir / f"codex-span-{stamp}-{i}.stdout.log"
-            err_log = logs_dir / f"codex-span-{stamp}-{i}.stderr.log"
-            print(f"  Starting session {i}/{len(prepared)}: {p['source'].name}")
-            rc = codex_logged(codex, args, env, p["prompt"], out_log, err_log)
-            return p, rc
+    with CodexDashboard(
+        corpus_label=cfg["label"],
+        total_sources=total_sources,
+        initial_completed=initial_completed,
+        selected=len(pending),
+        reasoning=reasoning,
+        model=model,
+        mode=mode,
+        usage_percent=initial_usage,
+        usage_reset=initial_reset,
+        enabled=tui_enabled,
+    ) as dash:
+        if guarded_parallel:
+            prepared = [prepare(cfg, s, pause) for s in pending]
+            for p in prepared:
+                dash.stage(p["source"].name, "Extracting (Codex)")
 
-        with ThreadPoolExecutor(max_workers=jobs) as pool:
-            results = list(pool.map(launch, enumerate(prepared, 1)))
+            def launch(item: tuple[int, dict]) -> tuple[dict, int]:
+                i, p = item
+                out_log = logs_dir / f"codex-span-{stamp}-{i}.stdout.log"
+                err_log = logs_dir / f"codex-span-{stamp}-{i}.stderr.log"
+                dash.log("START", f"session {i}/{len(prepared)}: {p['source'].name}")
+                rc = codex_logged(codex, args, env, p["prompt"], out_log, err_log)
+                return p, rc
 
-        for p, rc in results:
-            name = p["source"].name
-            if rc != 0:
-                msg = f"Codex session for {name} exited {rc} (see logs/)."
-                print(f"  [fail] {msg}")
-                failure_messages.append(msg)
-                failures += 1
-                continue
-            try:
-                summary = expand_spans(cfg, p["source"], p["spans_path"], p["out_path"], name)
-                add_checkpoint(progress_path, summary)
-                completed_outputs.append(str(p["out_path"]))
-                print(f"  Completed: {name} -> {p['out_path']}")
-            except Exception as exc:  # noqa: BLE001 - report and continue
-                msg = f"{name}: {exc}"
-                print(f"  [fail] {msg}")
-                failure_messages.append(msg)
-                failures += 1
-    else:
-        print(f"  Execution: sequential ({len(pending)} Codex session(s))")
-        for i, source in enumerate(pending, 1):
-            if not disable_wall_clock_guard:
-                elapsed_minutes = (monotonic() - started) / 60
-                if elapsed_minutes >= max_run_minutes:
-                    reason = (
-                        f"wall-clock guard reached {elapsed_minutes:.1f} minutes "
-                        f"(limit {max_run_minutes} minutes)"
+            with ThreadPoolExecutor(max_workers=jobs) as pool:
+                results = list(pool.map(launch, enumerate(prepared, 1)))
+
+            for p, rc in results:
+                name = p["source"].name
+                # A non-zero Codex exit does not mean the spans were not written,
+                # so try to salvage an existing spans file before counting a fail.
+                try:
+                    if p["spans_path"].exists():
+                        dash.stage(name, "Expanding spans")
+                        summary = expand_spans(cfg, p["source"], p["spans_path"], p["out_path"], name)
+                        add_checkpoint(progress_path, summary)
+                        completed_outputs.append(str(p["out_path"]))
+                        dash.session_done(name, success=True, empty_count=_empty_count_from_summary(summary))
+                    elif rc != 0:
+                        failure_messages.append(f"Codex session for {name} exited {rc} (see logs/).")
+                        failures += 1
+                        dash.session_done(name, success=False, error=f"exit {rc} (see logs/)")
+                    else:
+                        raise RuntimeError(f"Spans file was not produced by Codex: {p['spans_path']}")
+                except Exception as exc:  # noqa: BLE001 - report and continue
+                    failure_messages.append(f"{name}: {exc}")
+                    failures += 1
+                    dash.session_done(name, success=False, error=str(exc))
+        else:
+            for i, source in enumerate(pending, 1):
+                if not disable_wall_clock_guard:
+                    elapsed_minutes = (monotonic() - started) / 60
+                    if elapsed_minutes >= max_run_minutes:
+                        reason = (
+                            f"wall-clock guard reached {elapsed_minutes:.1f} minutes "
+                            f"(limit {max_run_minutes} minutes)"
+                        )
+                        dash.note(f"  Stopping before next source: {reason}")
+                        report = write_stop_report(
+                            cfg, reason, len(completed_outputs), completed_outputs,
+                            last_source, codex_usage_status(codex, env, usage_status_file),
+                            failure_messages,
+                        )
+                        dash.note(f"  Stop report: {report}")
+                        return 0
+                if not disable_usage_guard:
+                    allowed, usage, reason = usage_allows_start(codex, env, usage_stop_percent, usage_status_file)
+                    if usage:
+                        dash.set_usage(usage.get("percent_left"), usage.get("reset", ""))
+                    else:
+                        dash.log("WARN", "Codex 5h usage status unavailable; continuing without a hard guard.")
+                    if not allowed:
+                        dash.note(f"  Stopping before next source: {reason}")
+                        report = write_stop_report(cfg, reason, len(completed_outputs), completed_outputs,
+                                                   last_source, usage, failure_messages)
+                        dash.note(f"  Stop report: {report}")
+                        return 0
+                last_source = source.name
+                dash.log("START", f"session {i}/{len(pending)}: {source.name}")
+                try:
+                    dash.stage(source.name, "Cleaning source")
+                    p = prepare(cfg, source, pause)
+                    dash.stage(source.name, "Extracting (Codex)")
+                    rc = run_codex_session(
+                        codex, args, env, p["prompt"],
+                        logged=dash.enabled, logs_dir=logs_dir, stamp=stamp, idx=i,
                     )
-                    print(f"  Stopping before next source: {reason}")
+                    # Codex frequently exits non-zero even after writing a complete
+                    # spans file -- most often when the 5h usage limit is exhausted
+                    # right as the session ends. The extraction still succeeded, so
+                    # always try to expand + checkpoint an existing spans file BEFORE
+                    # treating the run as failed; otherwise a finished extraction is
+                    # thrown away and never reaches output/ or progress.jsonl.
+                    saved = False
+                    if p["spans_path"].exists():
+                        dash.stage(source.name, "Expanding spans")
+                        summary = expand_spans(cfg, source, p["spans_path"], p["out_path"], source.name)
+                        add_checkpoint(progress_path, summary)
+                        completed_outputs.append(str(p["out_path"]))
+                        dash.session_done(source.name, success=True, empty_count=_empty_count_from_summary(summary))
+                        saved = True
+                    if rc != 0:
+                        if saved:
+                            reason = (f"Codex session exited {rc} after {source.name} was "
+                                      "saved (likely 5h usage limit reached)")
+                            dash.note(f"  [stop] {reason}")
+                        else:
+                            reason = f"Codex session failed with exit code {rc}"
+                            failure_messages.append(f"Codex exited {rc} for {source.name}.")
+                            dash.session_done(source.name, success=False, error=f"exit {rc}")
+                        report = write_stop_report(
+                            cfg, reason, len(completed_outputs), completed_outputs,
+                            last_source, codex_usage_status(codex, env, usage_status_file),
+                            failure_messages,
+                        )
+                        dash.note(f"  Stop report: {report}")
+                        return 0 if saved else 1
+                    if not saved:
+                        raise RuntimeError(f"Spans file was not produced by Codex: {p['spans_path']}")
+                except Exception as exc:  # noqa: BLE001 - report and continue
+                    failure_messages.append(f"{source.name}: {exc}")
+                    dash.session_done(source.name, success=False, error=str(exc))
                     report = write_stop_report(
-                        cfg, reason, len(completed_outputs), completed_outputs,
-                        last_source, codex_usage_status(codex, env, usage_status_file),
-                        failure_messages,
-                    )
-                    print(f"  Stop report: {report}")
-                    return 0
-            if not disable_usage_guard:
-                allowed, usage, reason = usage_allows_start(codex, env, usage_stop_percent, usage_status_file)
-                if usage:
-                    print(f"  Usage: {usage['percent_left']}% 5h left (reset {usage.get('reset', '')})")
-                else:
-                    print("  [warn] Codex 5h usage status is unavailable; continuing. "
-                          "Provide --usage-status-file or CODEX_5H_LIMIT_PERCENT_LEFT for a hard guard.")
-                if not allowed:
-                    print(f"  Stopping before next source: {reason}")
-                    report = write_stop_report(cfg, reason, len(completed_outputs), completed_outputs,
-                                               last_source, usage, failure_messages)
-                    print(f"  Stop report: {report}")
-                    return 0
-            print(f"\n  Session {i} of {len(pending)}: {source.name}")
-            last_source = source.name
-            try:
-                p = prepare(cfg, source, pause)
-                rc = codex_live(codex, args, env, p["prompt"])
-                if rc != 0:
-                    msg = f"Codex exited {rc} for {source.name}."
-                    print(f"  [fail] {msg}")
-                    failure_messages.append(msg)
-                    report = write_stop_report(
-                        cfg, f"Codex session failed with exit code {rc}",
-                        len(completed_outputs), completed_outputs, last_source,
+                        cfg, "Extraction step failed", len(completed_outputs),
+                        completed_outputs, last_source,
                         codex_usage_status(codex, env, usage_status_file), failure_messages,
                     )
-                    print(f"  Stop report: {report}")
+                    dash.note(f"  Stop report: {report}")
                     return 1
-                summary = expand_spans(cfg, source, p["spans_path"], p["out_path"], source.name)
-                add_checkpoint(progress_path, summary)
-                completed_outputs.append(str(p["out_path"]))
-                print(f"  Completed: {source.name} -> {p['out_path']}")
-            except Exception as exc:  # noqa: BLE001 - report and continue
-                msg = f"{source.name}: {exc}"
-                print(f"  [fail] {msg}")
-                failure_messages.append(msg)
-                report = write_stop_report(
-                    cfg, "Extraction step failed", len(completed_outputs),
-                    completed_outputs, last_source,
-                    codex_usage_status(codex, env, usage_status_file), failure_messages,
-                )
-                print(f"  Stop report: {report}")
-                return 1
 
     return 1 if failures else 0
 
@@ -607,7 +974,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Run the TPPO + Anak Codex span extractors (native Python).")
     ap.add_argument("--target", type=int, default=0, help="Sources to process per corpus; 0 means all pending until the usage guard stops (default 0).")
     ap.add_argument("--corpus", choices=["TPPO", "Anak", "both"], default="both")
-    ap.add_argument("--model", default="", help="Override the Codex model.")
+    ap.add_argument("--model", default="gpt-5.4-mini", help='Codex model (default "gpt-5.4-mini"; "" for the Codex CLI default).')
     ap.add_argument("--reasoning-effort", default="low", help='Codex model_reasoning_effort (default "low"; "" for model default).')
     ap.add_argument("--jobs", type=int, default=1, help="Max parallel Codex sessions per corpus (default 1).")
     ap.add_argument("--usage-stop-percent", type=int, default=10, help="Stop before starting another source when the 5h limit is below this percent (default 10).")
@@ -618,6 +985,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-pause", action="store_true", help="Tell Codex never to pause for confirmation.")
     ap.add_argument("--json-events", action="store_true", help="Pass --json to Codex.")
     ap.add_argument("--keep-mcp", action="store_true", help="Do not build the MCP-disabled Codex home.")
+    ap.add_argument("--no-tui", action="store_true", help="Disable the Rich live dashboard and stream Codex output line-by-line.")
     ap.add_argument("--status", action="store_true", help="Show counts for each corpus and exit.")
     a = ap.parse_args(argv)
 
@@ -674,6 +1042,7 @@ def main(argv: list[str] | None = None) -> int:
             cfg, codex, args, env, a.target, pause, a.jobs,
             a.usage_stop_percent, a.usage_status_file, a.disable_usage_guard,
             a.max_run_minutes, a.disable_wall_clock_guard,
+            reasoning=a.reasoning_effort, model=a.model, no_tui=a.no_tui,
         )
         if rc != 0:
             overall = 1

@@ -1,0 +1,91 @@
+{
+  "status": "completed",
+  "source_file": "16_Pid.Sus-Anak_2026_PN_Llg.txt",
+  "source_path": "downloads/kasus anak/raw-text/16_Pid.Sus-Anak_2026_PN_Llg.txt",
+  "source_sha256": "af7d6090200ff4efe57fe7518a7505282500fa1daf1a634c5843c8f104322f07",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 16/Pid.Sus-Anak/2026/PN Llg"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Anak Pengadilan Negeri Lubuk Linggau,"
+    ],
+    "keterangan_perkara": [
+      "Membaca Laporan Pembimbing Kemasyarakatan tanggal 18 Mei 2026\ntentang pelaksanaan kesepakatan diversi dalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "Anak"
+    ],
+    "tempat_lahir": [
+      "Lubuk Linggau"
+    ],
+    "umur_tanggal_lahir": [
+      "14 tahun/28 Agustus 2026"
+    ],
+    "jenis_kelamin": [
+      "Laki-laki"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "Tempat tinggal : Jalan Jendral Sudirman RT. 05 Kelurahan Lubuk\nLinggau,  Kecamatan  Lubuk  Linggau  Barat  II,\nKota Lubuk Linggau;"
+    ],
+    "agama": [
+      "Islam"
+    ],
+    "pekerjaan": [
+      "Pelajar SMP"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [],
+    "pertimbangan_hukum": [
+      "Menimbang,  bahwa oleh karena berdasarkan Laporan Pembimbing\nKemasyarakatan tanggal  18  Mei  2026 kesepakatan diversi telah selesai\ndilaksanakan, maka proses pemeriksaan perkara Anak harus dihentikan;\nMemperhatikan  Pasal  2  dan  Pasal  3  Peraturan  Mahkamah  Agung\nRepublik  Indonesia  Nomor  4  Tahun  2014  tentang  Pedoman  Pelaksanaan\nDiversi Dalam Sistem Peradilan Pidana Anak yang mewajibkan Diversi bagi\nAnak  yang  telah  berumur  12  (dua  belas)  tahun  tetapi  belum  berumur  18\n(delapan belas) tahun yang diancam dengan pidana penjara di bawah 7 (tujuh)\ntahun dan didakwa pula dengan tindak pidana yang diancam dengan pidana\npenjara  (tujuh)  tahun  atau  lebih  dalam  bentuk  surat  dakwaan  subsidiaritas,\nalternatif, kumulatif, maupun kombinasi (gabungan)."
+    ],
+    "amar_putusan": [
+      "MENETAPKAN\n1. Menghentikan proses pemeriksaan perkara Anak;\n2. Memerintahkan Penuntut Umum untuk mengeluarkan anak dari Tahanan\nKota Lubuk Linggau;\n3. Memerintahkan Panitera atau pejabat yang ditunjuk mengirimkan salinan\npenetapan  ini  kepada  Penuntut  Umum ,  Anak/Orang  tua  Anak  dan\nPembimbing Kemasyarakatan."
+    ],
+    "hari": [],
+    "tanggal": [
+      "18 Mei 2026"
+    ],
+    "tahun": [],
+    "siapa_yang_memutus": [
+      "Hakim"
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Hakim\nDelima Mariaigo Simanjuntak, S.H., M.H."
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "fakta_hukum",
+    "hari",
+    "tahun",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

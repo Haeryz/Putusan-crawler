@@ -1,0 +1,91 @@
+{
+  "status": "completed",
+  "source_file": "4_Pid.Sus-Anak_2025_PN_Mlg.txt",
+  "source_path": "downloads/kasus anak/raw-text/4_Pid.Sus-Anak_2025_PN_Mlg.txt",
+  "source_sha256": "ddc6980feb9c8b8d90303c1e148c3c2236ffd815563a9e0c08eb29f5a75c8150",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 2/Pen.Div/2025/PN Mlg\nJo\nNomor 4/Pid.Sus-Anak/2025/PN Mlg"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Majelis Hakim Anak Pengadilan Negeri Malang;"
+    ],
+    "keterangan_perkara": [
+      "Setelah membaca:  \n1. Berkas perkara tersebut;\n2. Penetapan  Ketua  Pengadilan  Negeri  Malang  Nomor  4/Pid.Sus-\nAnak/2025/PN  Mlg  tanggal  28  Agustus  2025  Tentang  Penunjukan\nMajelis Hakim yang memeriksa dan mengadili perkara Anak atas nama:"
+    ],
+    "nama_lengkap": [
+      "Anak Berhadapan Dengan Hukum"
+    ],
+    "tempat_lahir": [
+      "Purworejo"
+    ],
+    "umur_tanggal_lahir": [
+      "13 tahun / 21 Juni 2012"
+    ],
+    "jenis_kelamin": [
+      "Laki-Laki"
+    ],
+    "kebangsaan": [
+      "Indonesia"
+    ],
+    "tempat_tinggal": [
+      "Tempat Tinggal : Kabupaten Purworejo \n  Provinsi Jawa Tengah"
+    ],
+    "agama": [
+      "Islam"
+    ],
+    "pekerjaan": [
+      "Pelajar"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [
+      "3. Menyatakan barang bukti berupa:\n- 1 (satu) buah kursi plastik warna biru;\nDikembalikan kepada pemiliknya Melvin Abimayu Bramantyo"
+    ],
+    "fakta_hukum": [
+      "Menimbang  bahwa  oleh  karena  Kesepakatan  Diversi  telah  berhasil\nserta  oleh  karena  Kesepakatan  Diversi  tersebut  telah  memenuhi  dan\ntidak   bertentangan   dengan   peraturan   perundang - undangan,   maka\nproses \npemeriksaan perkara pidana Anak Nomor 4/Pid.Sus-Anak/2024/PN Mlg atas\nnama Anak tersebut haruslah dihentikan;"
+    ],
+    "pertimbangan_hukum": [
+      "Menimbang,  bahwa  oleh  karena  Hakim  Anak  perlu  mengeluarkan\nPenetapan  Penghentian  Pemeriksaan  Perkara  Anak  Nomor  4/Pid.Sus-\nAnak/2025/PN Mlg, berdasarkan penetapan penghentian pemeriksaan perkara\nNomor 4/Pid.Sus-Anak/2025/PN Mlg, yang dikeluarkan oleh Ketua Pengadilan\nNegeri Malang tanggal 24 September 2025;\nMemperhatikan, Undang-undang Nomor 11 tahun 2012 Tentang Sistem\nPeradilan Pidana Anak, Undang-undang Nomor 8 tahun 1981 tentang Kitab\nUndang-undang Hukum Acara Pidana, Peraturan Mahkamah Agung Nomor 4\nTahun 2014 Tentang Pedoman Pelaksanaan Diversi Dalam Sistem Peradilan\nPidana Anak, serta peraturan perundang-undangan lain yang bersangkutan;"
+    ],
+    "amar_putusan": [
+      "MENETAPKAN:\n1. Menyatakan  Musyawarah  Diversi  perkara  pidana  Anak\nNomor 4/Pid.Sus-Anak/2025/PN Mlg atas nama Anak Berhadapan Dengan\nHukum berhasil  mencapai  kesepakatan  dan  telah  dilaksanakan\nsepenuhnya;\n2. Menyatakan  menghentikan  Pemeriksaan  Perkara  Anak\nNomor 4/Pid.Sus-Anak/2025/PN Mlg atas nama Anak Berhadapan Dengan\nHukum;\n3. Menyatakan barang bukti berupa:\n- 1 (satu) buah kursi plastik warna biru;\nDikembalikan kepada pemiliknya Melvin Abimayu Bramantyo\n4. Memerintahkan Panitera menyampaikan salinan Penetapan\nini kepada Penuntut Umum;"
+    ],
+    "hari": [],
+    "tanggal": [],
+    "tahun": [],
+    "siapa_yang_memutus": [],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "       Hakim Anggota                               Hakim Ketua;                      \n\n  Hakim Anggota I                                                       Ketua Majelis    \n  Hakim Anggota II            \nHalaman 2 dari 3 Penetapan Nomor 4/Pid.Sus-Anak/2025/PN Mlg\n\n            Panitera Pengganti \n           Panitera Pengganti"
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "hari",
+    "tanggal",
+    "tahun",
+    "siapa_yang_memutus",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}

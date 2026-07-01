@@ -1,0 +1,94 @@
+{
+  "status": "completed",
+  "source_file": "7_Pid.Sus-Anak_2026_PN_Ktg.txt",
+  "source_path": "downloads/kasus anak/raw-text/7_Pid.Sus-Anak_2026_PN_Ktg.txt",
+  "source_sha256": "36aa5750048e655abd8bc1289ac04354e39bd0a64b919b50ff339ec733981b85",
+  "sections": {
+    "judul": [
+      "PENETAPAN"
+    ],
+    "nomor_putusan": [
+      "Nomor 2/Pen.Div/2026/PN Ktg\nJo.\nNomor 7/Pid.Sus-Anak/2026/PN Ktg"
+    ],
+    "irah_irah": [
+      "DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA"
+    ],
+    "nama_pengadilan_negeri": [
+      "Hakim Pengadilan Negeri Kotamobagu;"
+    ],
+    "keterangan_perkara": [
+      "Setelah membaca :\nHasil Kesepakatan Diversi tentang pelaksanaan Kesepakatan Diversi\ndalam perkara Anak:"
+    ],
+    "nama_lengkap": [
+      "Firdio S. Bonde Alias Dio;"
+    ],
+    "tempat_lahir": [
+      "Doloduo;"
+    ],
+    "umur_tanggal_lahir": [
+      "17 Tahun / 08 Maret 2009;"
+    ],
+    "jenis_kelamin": [
+      "Laki-laki;"
+    ],
+    "kebangsaan": [
+      "Indonesia;"
+    ],
+    "tempat_tinggal": [
+      "Tempat tinggal    : Desa  Doloduo  Kecamatan  Dumoga  Barat,\nKabupaten Bolaang Mongondow;  "
+    ],
+    "agama": [
+      "Islam;"
+    ],
+    "pekerjaan": [
+      "Pelajar/mahasiswa;"
+    ],
+    "penangkapan": [],
+    "penahanan": [],
+    "tuntutan": [],
+    "dakwaan": [],
+    "saksi": [],
+    "ahli": [],
+    "terdakwa": [],
+    "surat": [],
+    "petunjuk_barang_bukti": [],
+    "fakta_hukum": [
+      "Menimbang, bahwa berdasarkan hasil laporan kesepakatan diversi hari\nSelasa, 21 Mei 2026  yang pada pokoknya menerangkan Kesepakatan Diversi\ntelah selesai dilaksanakan, maka proses pemeriksaan perkara Anak  Firdio S.\nBonde Alias Dio harus dihentikan;"
+    ],
+    "pertimbangan_hukum": [
+      "Membaca  penetapan  Ketua  Pengadilan  Negeri  Kotamobagu  Nomor\n2/Pen.Div/2026/PN Ktg Jo Nomor 7/Pid.Sus-Anak/2026/PN Ktg tanggal 21 Mei\n2026 tentang pelaksanaan Kesepakatan Diversi.\nMemperhatikan,  Pasal  12  ayat  (3),  ayat  (4),  dan  ayat  (5)  Undang-\nUndang  Nomor  11  Tahun  2012  tentang  Sistem  Peradilan  Pidana  Anak  dan\nPeraturan  Mahkamah  Agung  Nomor  4  Tahun  2014  tentang  Pedoman\nPelaksanaan Diversi Dalam Sistem Peradilan Pidana Anak; "
+    ],
+    "amar_putusan": [
+      "MENETAPKAN\n1. Menghentikan proses pemeriksaan perkara Anak Firdio S. Bonde\nAlias Dio; \n2. Memerintahkan\nPanitera  mengirimkan  salinan  penetapan  ini  kepada  Penuntut  Umum\nAnak, Anak dan Orang Tua Anak."
+    ],
+    "hari": [
+      "21"
+    ],
+    "tanggal": [
+      "21 Mei"
+    ],
+    "tahun": [
+      "2026"
+    ],
+    "siapa_yang_memutus": [
+      "Hakim\n           Ttd\nHal. 1 dari 2 hal. Penetapan Nomor 7/Pid.Sus-Anak/2026/PN Ktg\n\nM Burhanuddin Yusuf, S.H., M.H."
+    ],
+    "panitera_pengganti": [],
+    "tanda_tangan_majelis": [
+      "Hakim\n           Ttd\nHal. 1 dari 2 hal. Penetapan Nomor 7/Pid.Sus-Anak/2026/PN Ktg\n\nM Burhanuddin Yusuf, S.H., M.H."
+    ]
+  },
+  "empty_sections": [
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "panitera_pengganti"
+  ],
+  "method": "codex_manual_extractive"
+}
