@@ -100,6 +100,10 @@ file with `status != "completed"`.
      input, `assistant` = pretty-printed JSON.
    - GRPO: `prompt` + gold `answer` (the JSON) for verifiable reward scoring.
 
+   > See [Stage 1 → **SFT data format**](#sft-data-format-conversation-style-single-turn-prompt-masked)
+   > for the exact row schema, a worked example, the rendered chat template, and the
+   > instruction-vs-conversation rationale.
+
 **Invariants (asserted at build time):** zero `source_sha256` overlap across splits; every span
 in every target is a substring of its reconstructed input.
 
@@ -120,6 +124,83 @@ language-only SFT.
   (putusan bodies are long — measure; expect ~4k–8k tokens).
 - Save `qwen_extractor_sft_lora` for Stage 2 to continue from.
 
+### SFT data format: conversation-style, single-turn, prompt-masked
+
+**Verdict (from the actual data, not assumed):** the SFT rows are **conversation / chat
+format** — the OpenAI-`messages` / ShareGPT style — **not** the Alpaca / Self-Instruct
+*instruction-triple* style (`{"instruction","input","output"}`). Each row is a single
+`messages` array of role-tagged turns: `system` (the fixed Indonesian extraction
+instruction), `user` (the reconstructed putusan body), `assistant` (the gold
+pretty-printed 31-key JSON). It is **single-turn** (one user turn, one assistant turn)
+and trained **prompt-masked** — loss is computed **only on the assistant JSON**. Source
+of truth: `notebooks/build_dataset.py` → `make_sft_row()` (emits the `messages` + `meta`
+row) and `notebooks/Qwen3_5_(4B).ipynb`, which renders each row with
+`tokenizer.apply_chat_template(...)` and trains with `SFTTrainer` +
+`train_on_responses_only`.
+
+This mirrors the format that top-venue instruction-tuning work converged on. LIMA
+demonstrates that a small, high-quality set of **role-delimited chat exchanges** (with an
+explicit end-of-turn token) is enough to teach a pretrained model to follow a target
+response format — *LIMA, NeurIPS 2023*. The Tülu study ("How Far Can Camels Go?")
+standardizes open instruction data into a **chat/`messages` schema** and shows the format
+and template materially affect downstream quality — *NeurIPS 2023 Datasets & Benchmarks*.
+The older **instruction-triple** lineage (Self-Instruct, ACL 2023; the Flan Collection,
+ICML 2023) is the alternative we deliberately do **not** use.
+
+| Format | Row shape | Lineage | Used here? |
+|--------|-----------|---------|-----------|
+| Instruction-triple | flat `instruction` / `input` / `output` fields | Self-Instruct (ACL 2023), Alpaca, Flan Collection (ICML 2023) | **No** |
+| **Conversation / chat** | `messages: [{role, content}, …]` + a chat template | LIMA (NeurIPS 2023), Tülu / "How Far Can Camels Go?" (NeurIPS 2023 D&B), Zephyr | **Yes** |
+
+**Why conversation, not instruction-triple, for this project:**
+
+- **Role turns are reused verbatim by GRPO.** Stage 2's `make_grpo_row()` takes the same
+  `system` + `user` turns as its `prompt` and scores completions against the gold JSON.
+  One chat schema serves both the SFT target and the GRPO verifiable prompt — a flat
+  instruction-triple would have to be re-templated for RL.
+- **A persistent system instruction** carries the "emit exactly 31 verbatim-span keys,
+  never paraphrase" contract as a first-class `system` turn (`SYSTEM_PROMPT` in
+  `build_dataset.py`), which is where extraction/anti-hallucination constraints belong.
+- **Native template alignment.** `unsloth/Qwen3.5-9B` ships a ChatML template; feeding
+  `messages` through `apply_chat_template` matches the base model's pretraining/finetune
+  format exactly and lets Unsloth's `train_on_responses_only` locate the assistant span.
+
+**Worked example — one real (abbreviated) `sft.jsonl` row.** Built from
+`LLM-aggregator/TPPO/GPT/output/50_Pid.Sus_2024_PN_Psr.json` (long spans elided as `…`;
+this is exactly the object `make_sft_row()` writes — a `messages` array plus provenance
+`meta`):
+
+```jsonl
+{"messages":[{"role":"system","content":"Anda adalah pengekstrak terstruktur putusan pengadilan Indonesia. Diberikan badan teks putusan, keluarkan SATU objek JSON dengan tepat 31 kunci bagian (dalam urutan kanonik). Setiap nilai adalah daftar kutipan verbatim (extractive) … Kunci bagian, dalam urutan: judul, nomor_putusan, irah_irah, …, tanda_tangan_majelis."},{"role":"user","content":"P U T U S A N\n\nNomor 50/Pid.sus/2024/PN Psr\n\nDEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA\n\nPengadilan Negeri Pasuruan\n\n… Terdakwa NOVAL ANDRIAN Bin SUDIRMAN SITUMORANG … [dakwaan …] … [pertimbangan_hukum …] … [amar_putusan …]"},{"role":"assistant","content":"{\n  \"status\": \"completed\",\n  \"source_file\": \"50_Pid.Sus_2024_PN_Psr.txt\",\n  \"source_sha256\": \"20763799…d7f8e\",\n  \"sections\": {\n    \"judul\": [\"P U T U S A N\"],\n    \"nomor_putusan\": [\"Nomor 50/Pid.sus/2024/PN Psr\"],\n    \"irah_irah\": [\"DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA\"],\n    \"nama_pengadilan_negeri\": [\"Pengadilan Negeri Pasuruan\"],\n    …,\n    \"dakwaan\": [\"…\"],\n    \"saksi\": [\"…\"],\n    \"ahli\": [],\n    …,\n    \"amar_putusan\": [\"…\"],\n    …,\n    \"tanda_tangan_majelis\": [\"…\"]\n  },\n  \"empty_sections\": [\"ahli\"]\n}"}],"meta":{"corpus":"TPPO","model":"GPT","source_sha256":"20763799…d7f8e","source_file":"50_Pid.Sus_2024_PN_Psr.txt","also_extracted_by":[]}}
+```
+
+Notes: every `sections` value is a **list of verbatim spans** (many are multi-thousand-token
+— e.g. `saksi` ≈ 36k chars, `dakwaan` ≈ 16k in this file); truly-empty keys carry `[]` and
+are also listed in `empty_sections` (here `["ahli"]`); `meta` is provenance only and is
+**not** fed to the model.
+
+**Rendered chat template (what the model actually sees).** `apply_chat_template` flattens
+the `messages` into one Qwen ChatML string; `train_on_responses_only` then masks the loss
+so only the assistant JSON contributes gradient:
+
+```text
+<|im_start|>system
+Anda adalah pengekstrak terstruktur putusan … tanda_tangan_majelis.<|im_end|>   ┐
+<|im_start|>user                                                                │ loss MASKED
+P U T U S A N … Nomor 50/Pid.sus/2024/PN Psr … [amar_putusan …]<|im_end|>        │ (prompt tokens)
+<|im_start|>assistant                                                           ┘
+{                                                                               ┐
+  "status": "completed", … "empty_sections": ["ahli"]                           │ loss SUPERVISED
+}<|im_end|>                                                                      ┘ (assistant JSON only)
+```
+
+**Loss masking + caveat.** We train on responses only (mask the long putusan prompt).
+*Instruction Tuning With Loss Over Instructions* (NeurIPS 2024) reports that prompt-masking
+can **underperform** when inputs are long and outputs are short — but here the assistant
+JSON target is itself long (all 31 sections of verbatim spans), so completion-only loss is
+the correct default. Treat "extend the loss over the input" as a tuning knob to revisit
+only if extraction quality plateaus.
+
 **Goal:** reliably emit valid 31-key JSON with verbatim spans given a putusan body.
 
 ---
@@ -132,6 +213,28 @@ language-only SFT.
 All rewards are **verifiable** — we hold both the gold JSON and the input text, so no LLM judge
 is needed. Each sampled completion is scored by the **sum** of the reward functions below
 (mirroring the notebook's `match_format_exactly` / `match_format_approximately` / `check_answer`).
+
+### What GRPO is and how it learns
+
+**Technical version.** GRPO (Group Relative Policy Optimization; Shao et al., 2024,
+DeepSeekMath, arXiv 2402.03300) is a **critic-free** policy-gradient RL algorithm. For each
+prompt `q`, sample a **group** of `G` completions `{o_1 … o_G}` from the current policy and
+score each with the verifiable reward `r_i` (here, the sum of the six functions below).
+Unlike PPO, GRPO trains **no value/critic network**; it uses the group itself as the
+baseline: the advantage is `A_i = (r_i − mean(r)) / std(r)` — each completion is judged
+**relative to its siblings on the same prompt**. The policy is nudged (clipped PPO-style) to
+raise the probability of above-average completions and lower below-average ones, with a **KL
+penalty to the frozen SFT reference** to prevent drift. No critic → less memory, simpler, and
+a natural fit for verifiable-reward tasks. Here `G = num_generations = 4`.
+
+**Analogy version (non-technical).** Imagine coaching a law clerk to extract case data. For
+each case you ask for **4 draft extractions** (the group). A fixed **rubric** — not a human
+judge, just a checklist: valid JSON? all 31 fields? every quote actually in the source? —
+scores the 4 drafts. You never need an expert to say "8/10 is good" in the abstract; you just
+**compare the 4 drafts to each other**: those above the group average get "do more of this,"
+those below get "do less of this." Repeat over many cases and the clerk drifts toward the
+habits that score well. A **KL leash** keeps them from forgetting everything they learned in
+"training school" (SFT) while chasing rubric points.
 
 | # | Reward | Signal |
 |---|--------|--------|
@@ -162,6 +265,66 @@ Save `qwen_extractor_grpo_lora`, then merge to 16-bit for serving.
 RAG-Anything / LightRAG is **not yet installed** — it must be added (`raganything` / LightRAG
 core; the multimodal parser is skipped since our text is already clean). Implements
 [`README.md`](./README.md) §4–§5.
+
+### 3.0 How RAG-Anything works (per the paper)
+
+**Technical version.** RAG-Anything (Guo et al., 2025, arXiv 2510.12323) is a three-stage
+pipeline: **universal indexing → cross-modal hybrid retrieval → knowledge-enhanced synthesis.**
+
+1. **Universal indexing.**
+   - *Multimodal Knowledge Unification:* each source `k_i` is decomposed into atomic content
+     units `c_j = (t_j, x_j)` — a modality type `t_j ∈ {text, image, table, equation}` plus
+     raw content `x_j` — while keeping figures grounded to captions, equations to definitions,
+     tables to their narrative.
+   - *Dual-graph construction:*
+     - **Cross-modal KG** — for each non-text unit an MLLM derives two texts: a *detailed
+       description* `d_j` (for retrieval) and an *entity summary* `e_j` (for the graph),
+       generated context-aware over a neighborhood window `δ`. The unit becomes an anchor
+       node `v_mm^j`; its intra-chunk entities attach via `belongs_to` edges.
+     - **Text KG** — standard LightRAG/GraphRAG NER + relation extraction over text chunks.
+   - *Graph fusion + index:* the two graphs are merged by **entity-name alignment** into a
+     unified `G = (V, E)`; all entities, relations, and chunks are embedded into table `T`;
+     the retrieval index is `I = (G, T)`.
+2. **Cross-modal hybrid retrieval** over `I = (G, T)`:
+   - Modality-aware query encoding: detect lexical modality cues + compute query embedding `e_q`.
+   - Two complementary pathways: **Structural Knowledge Navigation** (exact entity match on
+     `G` then neighborhood/hop expansion → `C_stru(q)`, good for multi-hop relations) and
+     **Semantic Similarity Matching** (dense top-k over `T` → `C_seman(q)`).
+   - **Candidate pool unification** `C = C_stru ∪ C_seman`, then **multi-signal fusion scoring**
+     (graph structural importance + embedding similarity + modality preference) → ranked `C*(q)`.
+3. **Synthesis:** build textual context `P(q)` (concatenate entity summaries + relation
+   descriptions + chunk contents with modality delimiters), recover visual content `V*(q)`,
+   then `Response = VLM(q, P(q), V*(q))`.
+
+The four LightRAG **dual-level** retrieval modes are the knobs on step 2: *low-level keys*
+(concrete entities) → `local`; *high-level keys* (abstract themes) → `global`; both →
+`hybrid`; plain vector search with no graph → `naive`.
+
+**How we specialize it (text-only).** Our extractor already outputs clean 31-section JSON —
+no images, tables, or equations — so the cross-modal KG, MLLM unit descriptions, and VLM
+visual dereferencing are **no-ops**. We run the **text-KG branch only (= LightRAG)**.
+Retrieval still uses **both** pathways — structural navigation over the legal entity/relation
+graph *and* semantic vector matching, fused — and synthesis uses a **text LLM (Claude)**
+instead of a VLM. So we inherit RAG-Anything's graph+vector hybrid retrieval, not its
+multimodal front-end.
+
+**Analogy version (non-technical).** Picture a **courthouse records room**:
+
+- *Indexing* = a clerk reads every decision and builds **two** finding aids: (1) a wall of
+  index cards cross-linked "Judge X sentenced Defendant Y", "this case cites Article Z" — a
+  web of who-relates-to-whom (**the knowledge graph**); and (2) a Google-style "find similar
+  wording" search (**the vector index**). RAG-Anything builds both.
+- For documents with charts/photos/tables, the clerk also *describes each picture in words*
+  and pins that description beside the paragraph it came from, so images become searchable.
+  Our legal texts have no pictures, so this step is simply skipped.
+- *Answering a question* = **two librarians work at once**: one **follows the cross-links**
+  ("start at this judge → their cases → the articles cited" — best for multi-step
+  relationship questions), the other does a **fuzzy meaning search** ("find passages that
+  sound like the question"). Their finds are pooled, de-duplicated, ranked, and handed to a
+  **writer (the LLM)** who composes a cited answer.
+- The four **modes** = how wide the librarian looks: `local` = one case / one person;
+  `global` = trends across the whole archive; `hybrid` = both (default); `naive` = skip the
+  card wall, just fuzzy-search.
 
 **Scripts (new):** `RAG/ingest.py`, `RAG/serve.py`.
 
@@ -278,9 +441,18 @@ Feedback is converted to training data **on a schedule — never live**.
 ## References (top venues, last 3 years)
 
 - **RAG-Anything: All-in-One RAG Framework** — [arXiv 2510.12323](https://arxiv.org/abs/2510.12323) — chosen serving framework (LightRAG graph retrieval).
+- **GRPO / DeepSeekMath** — [arXiv 2402.03300](https://arxiv.org/abs/2402.03300) — Group Relative Policy Optimization: critic-free, group-relative-advantage RL used in Stage 2.
 - **LegalBench** — [NeurIPS 2023 Datasets & Benchmarks](https://proceedings.neurips.cc/paper_files/paper/2023/file/89e44582fd28ddfea1ea4dcb0ebbf4b0-Paper-Datasets_and_Benchmarks.pdf) — extraction F1 + normalization protocol.
 - **CRAG: Comprehensive RAG Benchmark** — [NeurIPS 2024 Datasets & Benchmarks](https://proceedings.neurips.cc/paper_files/paper/2024/hash/1435d2d0fca85a84d83ddcb754f58c29-Abstract-Datasets_and_Benchmarks_Track.html) — RAG accuracy + hallucination scoring.
 - **ARES: Automated RAG Evaluation** — [arXiv 2311.09476](https://arxiv.org/abs/2311.09476) — context relevance / answer faithfulness / answer relevance + PPI.
 - **RAGAS** — reference-free faithfulness / answer relevancy / context precision-recall.
 - **MultiHop-RAG** — multi-hop retrieval evaluation for relation-traversal queries.
 - **RAG Foundry** — [arXiv 2408.02545](https://arxiv.org/abs/2408.02545) — retained as an evaluation harness reference only.
+
+### SFT data-format references (Stage 1)
+
+- **LIMA: Less Is More for Alignment** — [NeurIPS 2023](https://proceedings.neurips.cc/paper_files/paper/2023/hash/ac662d74829e4407ce1d126477f4a03a-Abstract-Conference.html) — small, high-quality **conversation-format** SFT with explicit end-of-turn tokens; basis for the single-turn chat schema.
+- **How Far Can Camels Go? (Tülu)** — [NeurIPS 2023 Datasets & Benchmarks](https://proceedings.neurips.cc/paper_files/paper/2023/hash/ec6413875e4ab08d7bc4d8e225263398-Abstract-Datasets_and_Benchmarks.html) — standardizes open instruction data into a chat/`messages` schema; format/template effects.
+- **The Flan Collection** — [ICML 2023](https://proceedings.mlr.press/v202/longpre23a.html) — the instruction-format lineage we contrast against.
+- **Self-Instruct** — [ACL 2023 / arXiv 2212.10560](https://arxiv.org/abs/2212.10560) — origin of the Alpaca-style instruction-triple format (contrast, not used).
+- **Instruction Tuning With Loss Over Instructions** — [NeurIPS 2024](https://proceedings.neurips.cc/paper_files/paper/2024/hash/7ffb43adf37b3eeaba559098bc084cc6-Abstract-Conference.html) — prompt-masking vs loss-over-instruction tradeoff; justifies our `train_on_responses_only` default and its caveat.
