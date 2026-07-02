@@ -19,11 +19,11 @@ $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 Set-Location -LiteralPath $RepositoryRoot
 
 # Central configuration. Change the parameter defaults above for one-click use.
-$PauseFile = "LLM-aggregator/Anak/Deepseek/pause"
-$InputDir = "downloads/kasus anak/raw-text"
-$OutputDir = "LLM-aggregator/Anak/Deepseek/output"
-$StateFile = "LLM-aggregator/Anak/Deepseek/progress.jsonl"
-$EnvFile = "LLM-aggregator/Anak/Deepseek/.env"
+$PauseFile = "LLM-aggregator/Asusila/Deepseek/pause"
+$InputDir = "downloads/Asusila/raw-text"
+$OutputDir = "LLM-aggregator/Asusila/Deepseek/output"
+$StateFile = "LLM-aggregator/Asusila/Deepseek/progress.jsonl"
+$EnvFile = "LLM-aggregator/Asusila/Deepseek/.env"
 
 if ($Action -eq "Pause") {
     New-Item -ItemType File -Force -Path $PauseFile | Out-Null
@@ -37,8 +37,7 @@ if ($Action -eq "Resume") {
 }
 
 $PythonArguments = @(
-    "-m", "llm_aggregator.
-    anak_deepseek",
+    "-m", "llm_aggregator.asusila_deepseek",
     "--input-dir", $InputDir,
     "--output-dir", $OutputDir,
     "--state", $StateFile,

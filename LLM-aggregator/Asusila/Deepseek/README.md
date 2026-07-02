@@ -1,7 +1,7 @@
-# Putusan Anak DeepSeek Aggregator
+# Putusan Asusila (Pidana Biasa) DeepSeek Aggregator
 
 This pipeline reads every `.txt` decision in
-`downloads/kasus anak/raw-text`, sends a cleaned line-numbered source to
+`downloads/Asusila/raw-text`, sends a cleaned line-numbered source to
 `deepseek-ai/DeepSeek-V4-Pro` through W&B Inference, and asks the model to
 return only small line spans using the same contract as the Codex extractor:
 `{"sections": {"field": {"lines": [[start, end]]}}}` / `text` / `empty`.
@@ -25,10 +25,10 @@ correct 31-section answer: `{"lines": []}`/`{"text": []}` become empty, a flat
 coerced range is still bounds-checked and expanded to a verbatim source
 excerpt.
 
-The user prompt embeds `LLM-aggregator/Anak/GPT/SPAN_EXTRACTION_SPEC.md`,
+The user prompt embeds `LLM-aggregator/Asusila/GPT/SPAN_EXTRACTION_SPEC.md`,
 sanitized field guidance from
-`LLM-aggregator/Anak/GPT/CODEX_EXTRACTION_INSTRUCTIONS.md`,
-`LLM-aggregator/Anak/GPT/Putusan-schema.md`, and the cleaned line-numbered
+`LLM-aggregator/Asusila/GPT/CODEX_EXTRACTION_INSTRUCTIONS.md`,
+`LLM-aggregator/Asusila/GPT/Putusan-schema.md`, and the cleaned line-numbered
 source. Launcher, checkpoint, usage-guard, and Codex agent-loop directions are
 removed before the prompt is sent. DeepSeek only locates line ranges and short
 literals; deterministic Python code writes the final extraction JSON.
@@ -51,55 +51,55 @@ a W&B project, set `WANDB_PROJECT=entity/project` or pass `--project`.
 The Windows and Unix launchers contain all normal configuration in one place:
 
 ```powershell
-.\LLM-aggregator\Anak\Deepseek\run-anak-deepseek.ps1
+.\LLM-aggregator\Asusila\Deepseek\run-asusila-deepseek.ps1
 ```
 
 ```bash
-./LLM-aggregator/Anak/Deepseek/run-anak-deepseek.sh
+./LLM-aggregator/Asusila/Deepseek/run-asusila-deepseek.sh
 ```
 
 Its defaults run eight parallel workers with reasoning off, a 32,768-token
 output budget per request, and the Rich live dashboard. Common controls:
 
 ```powershell
-.\LLM-aggregator\Anak\Deepseek\run-anak-deepseek.ps1 -Action Status
-.\LLM-aggregator\Anak\Deepseek\run-anak-deepseek.ps1 -Action Pause
-.\LLM-aggregator\Anak\Deepseek\run-anak-deepseek.ps1 -Action Resume
-.\LLM-aggregator\Anak\Deepseek\run-anak-deepseek.ps1 -Action RetryEmpty -MaxFiles 20
-.\LLM-aggregator\Anak\Deepseek\run-anak-deepseek.ps1 -Workers 8 -MaxFiles 100
+.\LLM-aggregator\Asusila\Deepseek\run-asusila-deepseek.ps1 -Action Status
+.\LLM-aggregator\Asusila\Deepseek\run-asusila-deepseek.ps1 -Action Pause
+.\LLM-aggregator\Asusila\Deepseek\run-asusila-deepseek.ps1 -Action Resume
+.\LLM-aggregator\Asusila\Deepseek\run-asusila-deepseek.ps1 -Action RetryEmpty -MaxFiles 20
+.\LLM-aggregator\Asusila\Deepseek\run-asusila-deepseek.ps1 -Workers 8 -MaxFiles 100
 ```
 
 Unix equivalents:
 
 ```bash
-./LLM-aggregator/Anak/Deepseek/run-anak-deepseek.sh --status
-./LLM-aggregator/Anak/Deepseek/run-anak-deepseek.sh --pause
-./LLM-aggregator/Anak/Deepseek/run-anak-deepseek.sh --resume
-./LLM-aggregator/Anak/Deepseek/run-anak-deepseek.sh --retry-empty --max-files 20
-./LLM-aggregator/Anak/Deepseek/run-anak-deepseek.sh --workers 8 --max-files 100
+./LLM-aggregator/Asusila/Deepseek/run-asusila-deepseek.sh --status
+./LLM-aggregator/Asusila/Deepseek/run-asusila-deepseek.sh --pause
+./LLM-aggregator/Asusila/Deepseek/run-asusila-deepseek.sh --resume
+./LLM-aggregator/Asusila/Deepseek/run-asusila-deepseek.sh --retry-empty --max-files 20
+./LLM-aggregator/Asusila/Deepseek/run-asusila-deepseek.sh --workers 8 --max-files 100
 ```
 
 Edit the parameter defaults at the top of
-`LLM-aggregator/Anak/Deepseek/run-anak-deepseek.ps1` for literal single-click
+`LLM-aggregator/Asusila/Deepseek/run-asusila-deepseek.ps1` for literal single-click
 use.
 
 Inspect the queue without calling the API:
 
 ```powershell
-uv run anak-deepseek-aggregate --dry-run
+uv run asusila-deepseek-aggregate --dry-run
 ```
 
 Run or resume all pending files:
 
 ```powershell
-uv run anak-deepseek-aggregate
+uv run asusila-deepseek-aggregate
 ```
 
 The default is eight concurrent API requests. Adjust bounded concurrency with
 `--workers` (1 to 16):
 
 ```powershell
-uv run anak-deepseek-aggregate --workers 8
+uv run asusila-deepseek-aggregate --workers 8
 ```
 
 Each worker owns its HTTP session and output file. The main thread serializes
@@ -125,9 +125,9 @@ the direct Python CLI both default to `off` (no thinking). Available levels are
 `off`, `low`, `medium`, `high`, and `xhigh`:
 
 ```powershell
-.\LLM-aggregator\Anak\Deepseek\run-anak-deepseek.ps1 -ReasoningEffort off
-.\LLM-aggregator\Anak\Deepseek\run-anak-deepseek.ps1 -ReasoningEffort low
-.\LLM-aggregator\Anak\Deepseek\run-anak-deepseek.ps1 -ReasoningEffort medium
+.\LLM-aggregator\Asusila\Deepseek\run-asusila-deepseek.ps1 -ReasoningEffort off
+.\LLM-aggregator\Asusila\Deepseek\run-asusila-deepseek.ps1 -ReasoningEffort low
+.\LLM-aggregator\Asusila\Deepseek\run-asusila-deepseek.ps1 -ReasoningEffort medium
 ```
 
 The default is `off` because the model only emits small line-span JSON: live
@@ -156,22 +156,22 @@ files.
 Process a bounded batch:
 
 ```powershell
-uv run anak-deepseek-aggregate --max-files 10
+uv run asusila-deepseek-aggregate --max-files 10
 ```
 
 Process or retry one exact decision:
 
 ```powershell
-uv run anak-deepseek-aggregate --source 3_Pid.Sus-Anak_2026_PN_Mrs.txt
+uv run asusila-deepseek-aggregate --source 103_Pid.B_2023_PN_Plg.txt
 ```
 
-Create `LLM-aggregator/Anak/Deepseek/pause` to stop before the next request.
+Create `LLM-aggregator/Asusila/Deepseek/pause` to stop before the next request.
 Delete that file and run the same command to resume. `Ctrl+C` also stops
 cleanly after preserving completed requests.
 
 Progress is append-only JSONL at
-`LLM-aggregator/Anak/Deepseek/progress.jsonl`. Each accepted response is saved
-atomically as `LLM-aggregator/Anak/Deepseek/output/<source-stem>.json`.
+`LLM-aggregator/Asusila/Deepseek/progress.jsonl`. Each accepted response is saved
+atomically as `LLM-aggregator/Asusila/Deepseek/output/<source-stem>.json`.
 Every file contains all 31 section arrays plus an explicit `empty_sections`
 list, making missing content visible without opening an aggregate CSV. Failed
 files remain pending and are retried on the next run. If a source file changes,
@@ -184,7 +184,7 @@ its stored SHA-256 no longer matches and it is processed again.
 - A partially empty result is accepted because many decisions genuinely omit
   sections such as arrest, experts, or documentary evidence.
 - Run
-  `.\LLM-aggregator\Anak\Deepseek\run-anak-deepseek.ps1 -Action RetryEmpty`
+  `.\LLM-aggregator\Asusila\Deepseek\run-asusila-deepseek.ps1 -Action RetryEmpty`
   to retry completed files
   with partial empty sections later. This action does not process unfinished
   files. The existing JSON is replaced only when the new extraction has fewer

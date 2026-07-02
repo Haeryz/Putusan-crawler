@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sinergi.local/schema/anak-codex-extraction.schema.json",
-  "title": "Codex Anak Court Decision Extraction",
+  "$id": "https://sinergi.local/schema/asusila-codex-extraction.schema.json",
+  "title": "Codex Asusila (Pidana Biasa) Court Decision Extraction",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -21,7 +21,7 @@
     "source_file": {
       "type": "string",
       "minLength": 1,
-      "description": "Raw text filename, for example 10_Pid.Sus-Anak_2021_PN_Unh.txt."
+      "description": "Raw text filename, for example 103_Pid.B_2023_PN_Plg.txt."
     },
     "source_path": {
       "type": "string",

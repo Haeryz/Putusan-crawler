@@ -1,86 +1,68 @@
-# Putusan Anak Section Classification Schema
+# Putusan Pengadilan — Section Classification Schema
 
 ## Overview
 
-This guide defines the 31 sections for manual Codex extraction of Indonesian
-juvenile criminal decisions (`Pid.Sus-Anak`) into per-source JSON files.
+This schema defines how to identify each **section (bagian)** of an Indonesian court decision (`putusan pengadilan`) using **boundary keyword matching**. Each section is bounded by:
 
-Use it together with:
+- **`kata_sebelum`** — keywords/phrases that appear **immediately before** the section's content
+- **`kata_sesudah`** — keywords/phrases that appear **immediately after** the section's content
 
-- `LLM-aggregator/Anak/GPT/Anak.json`
-- `LLM-aggregator/Anak/SKKMA Pidsus Anak-1.pdf`
-- `downloads/kasus anak/raw-text`
+The section content lies between any matched `kata_sebelum` and any matched `kata_sesudah`.
 
-Every extracted value must be an exact contiguous excerpt from the raw text.
-Do not summarize, paraphrase, translate, normalize OCR, or add reasoning inside
-any section value.
+---
 
 ## Codex Extractor JSON Schema
 
-The machine-readable output contract is:
+For Asusila (Pidana Biasa) Codex extraction, the machine-readable JSON Schema is:
 
-`LLM-aggregator/Anak/GPT/Anak.json`
+`LLM-aggregator/Asusila/GPT/Asusila.json`
+
+Use that file as the canonical output contract for Codex-generated JSON artifacts. The schema requires one extraction object per source document with:
+
+- `status`: `completed`, `no_text`, or `failed`.
+- `source_file`, `source_path`, and `source_sha256`: source identity and content hash.
+- `method`: always `codex_manual_extractive`.
+- `sections`: an object containing exactly the 31 snake_case section keys listed below.
+- `empty_sections`: section keys whose arrays are empty.
+- Optional `notes`: operational notes only, never legal reasoning or extracted summaries.
+
+Every `sections.<key>` value is an array of exact contiguous source excerpts. Use an empty array only when that section is absent or cannot be located after checking the direct label, aliases, boundary variants, and OCR variants. Do not summarize, paraphrase, translate, normalize OCR text, or add reasoning inside a section value.
 
 Store each processed decision as its own JSON file under:
 
-`LLM-aggregator/Anak/GPT/output/<source-stem>.json`
+`LLM-aggregator/Asusila/GPT/output/<source-stem>.json`
 
-Do not create one large aggregate JSON as the working extraction format.
+Do not store all Asusila extractions in one large JSON file. `Asusila.json` is the schema file only, not an aggregate extraction output. If a combined corpus JSON is needed later, generate it as a derived export from the individual files after extraction is complete.
 
-The output object must contain:
+## Codex Agent Loop
 
-- `status`: `completed`, `no_text`, or `failed`.
-- `source_file`, `source_path`, and `source_sha256`.
-- `method`: always `codex_manual_extractive`.
-- `sections`: exactly the 31 snake_case keys listed below.
-- `empty_sections`: exactly the keys whose section arrays are empty.
+Run Asusila extraction as a repeatable one-file loop, not as a fixed batch prompt. Each loop iteration processes exactly one pending raw-text file:
 
-## Anak Template Context
+```bash
+python3 run_extractions.py --corpus Asusila
+```
 
-The official Anak template is `LLM-aggregator/Anak/SKKMA Pidsus Anak-1.pdf`.
-It contains three common variants:
+The launcher invokes `codex exec` non-interactively and resumes from `LLM-aggregator/Asusila/GPT/progress.jsonl` plus existing files in `LLM-aggregator/Asusila/GPT/output/`.
+On Windows, use `.\LLM-aggregator\Asusila\GPT\run-codex-extraction.ps1` or the `.cmd` wrapper instead.
 
-- `Pid.I.B.1 Anak - Vrijspraak`: acquittal. The operative order usually says
-  the Anak/Para Anak is not legally and convincingly proven guilty, releases
-  the child from the indictment, restores rights, orders release from detention
-  if detained, and charges costs to the state.
-- `Pid.I.B.2 Anak - Lepas`: release from all legal charges. The reasoning may
-  say the conduct is proven but not punishable because of a justification,
-  excuse, or because it is not a criminal act.
-- `Pid.I.B.3 Anak - Terbukti`: conviction. The operative order usually includes
-  juvenile sanctions such as imprisonment, vocational training, supervision,
-  institutional placement, or other sanctions, plus detention credit/status,
-  evidence disposition, and case costs.
+With no target, the launcher processes all pending sources one at a time until the usage guard stops it, a failure occurs, or the corpus is complete. Use `-Target X` / `--target X` to launch up to X new Codex sessions. Each session extracts exactly one pending source file, then exits. `-MaxFiles` is only a backward-compatible PowerShell alias for `-Target`.
 
-Use the expected Anak order to resolve ambiguous boundaries:
+Guarded AFK runs are sequential so usage can be checked before every next source. Parallel sessions are available only when the usage guard is disabled.
 
-1. `P U T U S A N` / `PUTUSAN`, case number, irah-irah, court name, and case
-   description.
-2. Anak identity fields: `1. Nama lengkap` through `8. Pekerjaan`.
-3. Optional arrest sentence, then detention history in LPAS/LPKS.
-4. Assistance/counsel context: Penasihat Hukum, orangtua/wali/pendamping,
-   pemberi bantuan hukum, and Pembimbing Kemasyarakatan. This is context only
-   unless it is part of a target section.
-5. Procedural materials: Penetapan Ketua PN, Penetapan Hari Sidang, case file,
-   Laporan hasil penelitian kemasyarakatan, witnesses/experts/Anak statement,
-   parents/guardian/companion, letters, and goods.
-6. Prosecution demand after `Setelah mendengar pembacaan tuntutan pidana...`.
-7. Defense, request for leniency, replies, and rejoinders when present.
-8. Dakwaan after `Menimbang bahwa Anak/Para Anak didakwa berdasarkan surat
-   dakwaan Penuntut Umum...`.
-9. Evidence sequence: prosecution witnesses, prosecution experts, documents,
-   defense witnesses/experts/documents, verbalisan witnesses, Anak statement,
-   parent/guardian/companion statement, social inquiry report, and goods.
-10. Legal facts from `diperoleh fakta hukum sebagai berikut`.
-11. Legal reasoning, including dakwaan forms: tunggal, alternatif,
-   subsidairitas, kumulatif, and gabungan.
-12. Anak-specific reasoning: social inquiry/recommendation, juvenile sanctions,
-   best interest of the child, detention status, evidence disposition,
-   aggravating/mitigating factors, costs, and `Mengingat...`.
-13. `MENGADILI` operative orders.
-14. `Demikianlah diputuskan...` closing paragraph and signature block.
+1. Inspect `LLM-aggregator/Asusila/GPT/progress.jsonl` and `LLM-aggregator/Asusila/GPT/output/` to choose the next unprocessed `.txt` source.
+2. Read that one source file and extract the 31 schema fields as exact source excerpts.
+3. Write one output JSON file to `LLM-aggregator/Asusila/GPT/output/<source-stem>.json`.
+4. Verify the JSON object has all 31 section keys, exact excerpt values, and accurate `empty_sections`.
+5. Append one completed checkpoint record to `progress.jsonl`.
+6. Check current Codex/session usage before starting the next file.
 
-## Section Keys
+Continue the loop one file at a time until all sources are complete, the user stops the run, or the usage guard triggers. If remaining usage is below 10% of the active five-hour reset window, or the 270-minute wall-clock fallback triggers because `/status` text is unavailable, stop before starting another source and create a run report under:
+
+`LLM-aggregator/Asusila/GPT/reports/`
+
+The report should include processed count, completed output paths, last source handled, pending count, usage remaining, reset timing if visible, failures or skipped files, and the exact reason the loop stopped.
+
+The schema section keys map to the numbered fields as follows:
 
 | ID | Bagian Putusan | JSON key |
 |----|----------------|----------|
@@ -103,7 +85,7 @@ Use the expected Anak order to resolve ambiguous boundaries:
 | 17 | Dakwaan | `dakwaan` |
 | 18 | Saksi | `saksi` |
 | 19 | Ahli | `ahli` |
-| 20 | Terdakwa/Anak | `terdakwa` |
+| 20 | Terdakwa | `terdakwa` |
 | 21 | Surat | `surat` |
 | 22 | Petunjuk/Barang Bukti | `petunjuk_barang_bukti` |
 | 23 | Fakta Hukum | `fakta_hukum` |
@@ -116,35 +98,82 @@ Use the expected Anak order to resolve ambiguous boundaries:
 | 30 | Panitera Pengganti | `panitera_pengganti` |
 | 31 | Tanda Tangan Majelis | `tanda_tangan_majelis` |
 
-## Matching Rules
+---
 
-- Match labels and anchors case-insensitively.
-- BEFORE and AFTER lists are OR lists. Any single match can establish a
-  boundary.
-- Numbered prefixes such as `1.`, `2.`, or `I.` are optional locating syntax.
-- Preserve source line breaks, punctuation, spelling, and OCR artifacts.
-- `Anak`, `Para Anak`, `Terdakwa`, and `Para Terdakwa` may be used
-  inconsistently in real decisions. Use the section meaning to select the right
-  passage.
-- Treat `Kewarganegaraan` as the same field as `Kebangsaan`.
-- An optional `Pendidikan` identity line may appear between `Kebangsaan` and
-  `Tempat tinggal`; do not include it in `kebangsaan` or `tempat_tinggal`.
-- Return `[]` only after checking direct labels, aliases, and OCR variants.
+## Agent Usage Notes
 
-## Field Rules And Boundaries
+- Match is **case-insensitive** unless noted.
+- A `kata_sebelum` or `kata_sesudah` list is **OR-joined** — any single match is sufficient.
+- Some `kata_sebelum` entries include **numbered prefixes** (e.g., `1. Nama lengkap`) — strip the number prefix before matching or treat the prefix as optional.
+- Entries marked `# [variant]` are stylistic variants of the same keyword (spacing, punctuation, formatting differences in OCR'd documents).
+- Entries marked `# [spaced]` indicate letter-spaced OCR artifacts (e.g., `M E N G A D I L I`).
+- Where `kata_sebelum` is empty (`[]`), the section appears at the **start of the document**.
+- `⚠️ Note` fields contain edge-case observations from real putusan data.
+
+---
+
+## Pidana Biasa Format PDF Context
+
+The Pidana Biasa template in `LLM-aggregator/Asusila/Pidana Biasa Format KKMA.pdf` is the contextual authority for this schema. It contains three common criminal-decision variants:
+
+- `Pid.I.A.1.1 Biasa-Vrijspraak`: acquittal, usually ending with "tidak terbukti" and "Membebaskan".
+- `Pid.I.A.1.2 (Format Biasa Lepas)`: release from all legal charges, usually ending with "lepas dari segala tuntutan hukum".
+- `Pid.I.A.1.3 Format Biasa - Terbukti`: conviction, usually ending with "terbukti secara sah dan meyakinkan", imprisonment/fine, and possibly compensation/restitution where applicable.
+
+Use the keywords below as anchors, but use the template order to decide ambiguous boundaries. A section should preserve the original raw decision text between its start and end anchors. Do not summarize or normalize legal content inside a section.
+
+### Official Pidana Biasa Template Order
+
+1. Header: title, case number, irah-irah, court name, and case-type sentence.
+2. Defendant identity: numbered fields `1. Nama lengkap` through `8. Pekerjaan`.
+3. Arrest and detention: optional arrest sentence, then detention history. Detention may include up to 12 stages.
+4. Counsel status: appointed counsel, no counsel, or refusal of counsel. This is context only unless it is attached to detention text in the source.
+5. Procedural review: `Setelah membaca`, hearing schedule, case file, witness/expert/defendant/evidence hearing sentence.
+6. Prosecution demand: `Setelah mendengar pembacaan tuntutan pidana...`.
+7. Plea/response material: defense, leniency request, prosecution reply, defendant reply. Include this with Tuntutan only if the decision places it before the dakwaan boundary and it is not separately captured elsewhere.
+8. Dakwaan: `Menimbang bahwa Terdakwa/Para Terdakwa* didakwa berdasarkan surat dakwaan Penuntut Umum...`.
+9. Evidence sequence: prosecution witnesses, prosecution experts, documentary/electronic evidence, defendant statement, defense witnesses/experts/documents, verbalisan witness, and prosecution goods/evidence list.
+10. Facts: `diperoleh fakta hukum sebagai berikut`.
+11. Legal consideration: `Majelis Hakim akan mempertimbangkan...` followed by dakwaan forms and element analysis.
+12. Any special consideration (e.g. restitution/compensation) where applicable: keep it in Pertimbangan Hukum unless the operative order appears in Amar Putusan.
+13. Evidence disposition, aggravating/mitigating factors, costs, and `Mengingat...`: these remain part of Pertimbangan Hukum until `MENGADILI`.
+14. Amar Putusan: starts at `MENGADILI` and includes all operative numbered orders, including imprisonment, fines, any restitution/compensation, detention status, evidence disposition, and costs.
+15. Closing formula: `Demikianlah diputuskan...` contains day, date, year, deciding judges, pronouncement context, clerk, attendance, and signature block.
+
+### Pidana Biasa Extraction Guidance
+
+- **Defendant identity fields (6-13)**: extract only the value belonging to that numbered identity label. For multiple defendants, keep all defendants in the same section array for that field, preserving order (`Terdakwa I`, `Terdakwa II`, etc.) if present.
+- **Kebangsaan (10)**: the template note says this may appear as `Kewarganegaraan` under PERMA 9 Tahun 2017. Treat `Kebangsaan`, `Kewarganegaraan`, and nationality/citizenship wording as the same field.
+- **Penangkapan (14)**: include the full arrest sentence beginning with `ditangkap sejak tanggal` or `ditangkap pada` through its end date/order reference. If no arrest is stated, do not borrow detention text.
+- **Penahanan (15)**: include all detention stages under the relevant detention paragraph. The official detention sequence may include `Penyidik`, `Perpanjangan Penuntut Umum`, first/second `Perpanjangan Ketua Pengadilan Negeri`, `Penuntut Umum`, `Hakim/Majelis Hakim`, `Perpanjangan Ketua Pengadilan Tinggi`, and `Perpanjangan kedua Ketua Pengadilan Tinggi`. Include `Penangguhan`, `Pembantaran`, `Pengalihan Penahanan`, or `ditahan dalam perkara lain` when present.
+- **Tuntutan (16)**: capture the prosecution demand after `Setelah mendengar pembacaan tuntutan pidana... pada pokoknya sebagai berikut`. In many decisions this is the copied `amar surat tuntutan`; include numbered demand items, requested sentence, fine, any restitution/compensation, evidence disposition, and costs if present.
+- **Dakwaan (17)**: capture the charging text copied after `didakwa berdasarkan surat dakwaan Penuntut Umum Nomor... tanggal... sebagai berikut`. Include all forms of indictment: tunggal, alternatif, subsidairitas, kumulatif, and gabungan.
+- **Saksi (18)**: include prosecution witnesses, defense witnesses (`saksi yang meringankan` / `a de charge`), and verbalisan witnesses when the document treats them as witness testimony. Preserve each witness name, oath status, testimony bullets, and defendant response.
+- **Ahli (19)**: include both prosecution and defense expert evidence, including expert statements read into the record.
+- **Surat (21)**: include documentary and electronic evidence sections marked `Surat (termasuk alat bukti elektronik)` or `bukti surat`.
+- **Petunjuk/Barang Bukti (22)**: include the submitted goods/evidence list after `Penuntut Umum mengajukan barang bukti sebagai berikut` or similar. Do not confuse later legal discussion of evidence disposition with this inventory section; later disposition belongs to Pertimbangan Hukum or Amar Putusan depending on location.
+- **Fakta Hukum (23)**: starts at the formula `berdasarkan keterangan saksi-saksi... diperoleh fakta hukum sebagai berikut` and stops before the court begins the element/legal analysis (`Majelis Hakim akan mempertimbangkan...`).
+- **Pertimbangan Hukum (24)**: includes the element analysis under dakwaan forms (`DAKWAAN TUNGGAL`, `ALTERNATIF`, `SUBSIDAIRITAS`, `KUMULATIF`, `GABUNGAN`), conclusions about whether elements are fulfilled, any restitution/compensation consideration, detention consequence reasoning, evidence disposition reasoning, aggravating/mitigating circumstances, costs, and `Mengingat...` until `MENGADILI`.
+- **Amar Putusan (25)**: includes every numbered operative order after `MENGADILI`, not only the first order. For a conviction, include any restitution/compensation order if present.
+- **Closing fields (26-31)**: parse them from the `Demikianlah diputuskan...` paragraph and signature block. If the decision has different judges for deliberation and pronouncement, prefer the names after `oleh ... sebagai Hakim Ketua ... masing-masing sebagai Hakim Anggota` for `Siapa yang Memutus`, and keep pronouncement-attendance wording out unless needed to disambiguate.
+
+---
+
+## Classification Rules
+
+---
 
 ### 1. Judul
 
 ```yaml
 id: 1
 bagian: "Judul"
-kata_sebelum: []
+kata_sebelum: []  # start of document
 kata_sesudah:
   - "Nomor"
 ```
 
-Extract the beginning title, commonly `P U T U S A N`, `PUTUSAN`, or
-`PENETAPAN`, without page headers when they are separable.
+---
 
 ### 2. Nomor Putusan
 
@@ -153,13 +182,11 @@ id: 2
 bagian: "Nomor Putusan"
 kata_sebelum:
   - "Putusan"
-  - "Nomor"
 kata_sesudah:
-  - "DEMI KEADILAN"
   - "Pengadilan"
 ```
 
-Include the full visible decision number, especially `Pid.Sus-Anak`.
+---
 
 ### 3. Irah-irah
 
@@ -168,13 +195,11 @@ id: 3
 bagian: "Irah-irah"
 kata_sebelum:
   - "PN"
-  - "DEMI"
 kata_sesudah:
-  - "Pengadilan Anak"
   - "Pengadilan Negeri"
 ```
 
-Usually `DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA`.
+---
 
 ### 4. Nama Pengadilan Negeri
 
@@ -182,15 +207,13 @@ Usually `DEMI KEADILAN BERDASARKAN KETUHANAN YANG MAHA ESA`.
 id: 4
 bagian: "Nama Pengadilan Negeri"
 kata_sebelum:
-  - "Yang Maha Esa"
-  - "MAHA ESA"
+  - "Esa"
 kata_sesudah:
   - "yang mengadili perkara"
-  - "yang mengadili perkara pidana anak"
+  - "yang mengadili perkara-perkara"
 ```
 
-Include the court phrase identifying `Pengadilan Anak pada Pengadilan Negeri`
-or the district court name.
+---
 
 ### 5. Keterangan Perkara
 
@@ -198,16 +221,12 @@ or the district court name.
 id: 5
 bagian: "Keterangan Perkara"
 kata_sebelum:
-  - "mengadili perkara"
-  - "menjatuhkan putusan sebagai berikut"
+  - "Mengadili"
 kata_sesudah:
-  - "dalam perkara Anak"
   - "dengan"
-  - "1. Nama lengkap"
 ```
 
-Capture the case description, for example juvenile criminal case, examination
-procedure, level, and `Anak/Para Anak`.
+---
 
 ### 6. Nama Lengkap
 
@@ -215,15 +234,14 @@ procedure, level, and `Anak/Para Anak`.
 id: 6
 bagian: "Nama Lengkap"
 kata_sebelum:
-  - "1. Nama lengkap"
+  - "1. Nama lengkap"   # numbered prefix variant
   - "Nama lengkap"
 kata_sesudah:
-  - "2. Tempat lahir"
-  - "Tempat lahir"
+  - "2. tempat"         # numbered prefix variant
+  - "tempat"
 ```
 
-Extract only the identity value. For multiple Anak, use multiple array items or
-one item preserving the source's grouped labels.
+---
 
 ### 7. Tempat Lahir
 
@@ -231,27 +249,29 @@ one item preserving the source's grouped labels.
 id: 7
 bagian: "Tempat Lahir"
 kata_sebelum:
-  - "2. Tempat lahir"
-  - "Tempat lahir"
+  - "2. tempat"         # numbered prefix variant
+  - "tempat"
 kata_sesudah:
-  - "3. Umur/tanggal lahir"
-  - "Umur/tanggal lahir"
-  - "Umur"
+  - "3. umur"           # numbered prefix variant
+  - "umur"
 ```
 
-### 8. Umur/Tanggal Lahir
+---
+
+### 8. Umur / Tanggal Lahir
 
 ```yaml
 id: 8
 bagian: "Umur/Tanggal Lahir"
 kata_sebelum:
-  - "3. Umur/tanggal lahir"
-  - "Umur/tanggal lahir"
-  - "Umur"
+  - "3. umur"           # numbered prefix variant
+  - "umur"
 kata_sesudah:
-  - "4. Jenis kelamin"
-  - "Jenis kelamin"
+  - "4. Jenis"          # numbered prefix variant
+  - "Jenis"
 ```
+
+---
 
 ### 9. Jenis Kelamin
 
@@ -259,13 +279,14 @@ kata_sesudah:
 id: 9
 bagian: "Jenis Kelamin"
 kata_sebelum:
-  - "4. Jenis kelamin"
-  - "Jenis kelamin"
+  - "4. Jenis"          # numbered prefix variant
+  - "Jenis"
 kata_sesudah:
-  - "5. Kebangsaan"
-  - "Kebangsaan"
-  - "Kewarganegaraan"
+  - "5. kebangsaan"     # numbered prefix variant
+  - "kebangsaan"
 ```
+
+---
 
 ### 10. Kebangsaan
 
@@ -273,16 +294,16 @@ kata_sesudah:
 id: 10
 bagian: "Kebangsaan"
 kata_sebelum:
-  - "5. Kebangsaan"
-  - "Kebangsaan"
-  - "Kewarganegaraan"
+  - "5. kebangsaan"     # numbered prefix variant
+  - "kebangsaan"
 kata_sesudah:
-  - "6. Tempat tinggal"
-  - "Tempat tinggal"
-  - "Pendidikan"
+  - "6. tempat"         # numbered prefix variant
+  - "tempat"
 ```
 
-If `Pendidikan` appears after nationality, stop before it.
+# ⚠️ Note: some putusan include a "pendidikan" (education) field between Kebangsaan and Tempat Tinggal.
+
+---
 
 ### 11. Tempat Tinggal
 
@@ -290,12 +311,14 @@ If `Pendidikan` appears after nationality, stop before it.
 id: 11
 bagian: "Tempat Tinggal"
 kata_sebelum:
-  - "6. Tempat tinggal"
-  - "Tempat tinggal"
+  - "6. tempat"         # numbered prefix variant
+  - "tempat"
 kata_sesudah:
-  - "7. Agama"
+  - "7. Agama"          # numbered prefix variant
   - "Agama"
 ```
+
+---
 
 ### 12. Agama
 
@@ -303,12 +326,14 @@ kata_sesudah:
 id: 12
 bagian: "Agama"
 kata_sebelum:
-  - "7. Agama"
+  - "7. Agama"          # numbered prefix variant
   - "Agama"
 kata_sesudah:
-  - "8. Pekerjaan"
-  - "Pekerjaan"
+  - "8. pekerjaan"      # numbered prefix variant
+  - "pekerjaan"
 ```
+
+---
 
 ### 13. Pekerjaan
 
@@ -316,17 +341,14 @@ kata_sesudah:
 id: 13
 bagian: "Pekerjaan"
 kata_sebelum:
-  - "8. Pekerjaan"
-  - "Pekerjaan"
+  - "8. pekerjaan"      # numbered prefix variant
+  - "pekerjaan"
 kata_sesudah:
-  - "Anak ditangkap"
-  - "Para Anak ditangkap"
-  - "Anak/Para Anak ditangkap"
-  - "Anak ditahan"
-  - "Para Anak ditahan"
+  - "terdakwa ditangkap"
+  - "para terdakwa ditangkap"
 ```
 
-If no arrest/detention follows, stop before the next non-identity paragraph.
+---
 
 ### 14. Penangkapan
 
@@ -337,16 +359,13 @@ kata_sebelum:
   - "ditangkap sejak"
   - "ditangkap pada"
   - "surat perintah penangkapan"
-  - "Anak dilakukan penangkapan"
-  - "Para Anak dilakukan penangkapan"
+  - "Terdakwa dilakukan"
 kata_sesudah:
-  - "Anak ditahan"
-  - "Para Anak ditahan"
-  - "ditahan dalam tahanan"
-  - "ditahan oleh"
+  - "tanggal"
+  - "dalam perkara lain"
 ```
 
-Include only arrest wording and dates. Do not include detention stages here.
+---
 
 ### 15. Penahanan
 
@@ -354,21 +373,17 @@ Include only arrest wording and dates. Do not include detention stages here.
 id: 15
 bagian: "Penahanan"
 kata_sebelum:
-  - "ditahan dalam tahanan LPAS"
-  - "ditahan dalam tahanan LPKS"
-  - "ditahan oleh"
   - "dalam tahanan"
-  - "ditahan dalam perkara lain"
+  - "ditahan oleh :"
+  - "ditahan dalam"
+  - "Terdakwa dilakukan"
 kata_sesudah:
-  - "didampingi oleh Penasihat Hukum"
-  - "Pengadilan Anak pada Pengadilan Negeri tersebut"
-  - "Membaca Penetapan"
+  - "oleh :"
+  - "sejak tanggal"
+  - "dalam perkara lain"
 ```
 
-Include every detention authority and period: Penyidik, Perpanjangan Penuntut
-Umum, Penuntut Umum, Perpanjangan Ketua Pengadilan Negeri, Hakim/Majelis
-Hakim, and any penangguhan, pembantaran, pengalihan penahanan, or detention in
-another case.
+---
 
 ### 16. Tuntutan
 
@@ -376,17 +391,16 @@ another case.
 id: 16
 bagian: "Tuntutan"
 kata_sebelum:
-  - "Setelah mendengar pembacaan tuntutan pidana"
-  - "mendengar pembacaan tuntutan pidana"
+  - "mendengar pembacaan"
+  - "mendengar pula"          # [variant]
 kata_sesudah:
-  - "Setelah mendengar pembelaan"
-  - "Setelah mendengar permohonan"
-  - "Menimbang bahwa Anak"
-  - "Menimbang bahwa Para Anak"
+  - "pidana"
+  - "pidana yang diajukan"
+  - "Penuntut Umum"
+  - "Jaksa Penuntut Umum"     # [variant]
 ```
 
-Extract the complete prosecution demand. Include requested juvenile sanction,
-evidence disposition, and costs if present.
+---
 
 ### 17. Dakwaan
 
@@ -394,17 +408,19 @@ evidence disposition, and costs if present.
 id: 17
 bagian: "Dakwaan"
 kata_sebelum:
-  - "didakwa berdasarkan surat dakwaan"
-  - "berdasarkan surat dakwaan Penuntut Umum"
-  - "catatan dakwaan"
+  - "berdasarkan surat"
+  - "surat"
+  - "dengan"
+  - "Surat"
 kata_sesudah:
-  - "Menimbang bahwa terhadap dakwaan"
-  - "Menimbang bahwa untuk membuktikan"
-  - "Penuntut Umum telah mengajukan saksi"
+  - "Penuntut Umum"
+  - "Nomor Reg. Perkara"
+  - "sebgai berikut:"         # [typo variant — OCR artifact]
+  - "sebagai berikut :"
+  - "No. Reg."
 ```
 
-Include all forms: tunggal, alternatif, subsidairitas, kumulatif, and gabungan.
-For short-procedure cases, treat `catatan dakwaan` as dakwaan.
+---
 
 ### 18. Saksi
 
@@ -412,22 +428,19 @@ For short-procedure cases, treat `catatan dakwaan` as dakwaan.
 id: 18
 bagian: "Saksi"
 kata_sebelum:
-  - "Penuntut Umum telah mengajukan saksi-saksi"
-  - "mengajukan saksi-saksi"
-  - "menghadirkan saksi"
-  - "saksi yang meringankan"
-  - "a de charge"
-  - "saksi verbalisan"
+  - "mengajukan"
+  - "mengajukan para"         # [variant]
+  - "menghadirkan"            # [variant]
+  - "menghadapkan"            # [variant]
 kata_sesudah:
-  - "Penuntut Umum telah mengajukan Ahli"
-  - "Penuntut Umum telah mengajukan Surat"
-  - "Anak/Para Anak di persidangan"
-  - "di persidangan telah memberikan keterangan"
+  - "-Saksi"
+  - "-saksi"
+  - "yang memberikan keterangan"
+  - "sebagai berikut:"
+  - "ke depan Persidangan"
 ```
 
-Include prosecution witnesses, child victims, child witnesses, defense
-witnesses, verbalisan witnesses, oath status, testimony bullets, and the
-Anak/Para Anak response to each witness.
+---
 
 ### 19. Ahli
 
@@ -435,75 +448,72 @@ Anak/Para Anak response to each witness.
 id: 19
 bagian: "Ahli"
 kata_sebelum:
-  - "Penuntut Umum telah mengajukan Ahli"
-  - "Anak/Para Anak telah mengajukan Ahli"
-  - "mengajukan Ahli"
-  - "dibacakan di persidangan"
+  - "mengajukan"
+  - "alat bukti"
+  - "dibacakan keterangan"
+  - "terdakwa membenarkannya;"
 kata_sesudah:
-  - "Penuntut Umum telah mengajukan Surat"
-  - "mengajukan Surat"
-  - "saksi yang meringankan"
-  - "Anak/Para Anak di persidangan"
+  - "sebagai berikut:"
+  - "berupa;"
+  - "berupa ;"
+  - "yang telah dipanggil"
+  - "atas keterangan ahli"
 ```
 
-Include prosecution and defense experts, including expert statements read into
-the hearing.
+---
 
-### 20. Terdakwa/Anak
+### 20. Terdakwa (Keterangan)
 
 ```yaml
 id: 20
 bagian: "Terdakwa"
 kata_sebelum:
-  - "Anak/Para Anak di persidangan telah memberikan keterangan"
-  - "Anak di persidangan telah memberikan keterangan"
-  - "Para Anak di persidangan telah memberikan keterangan"
-  - "Terdakwa/Para Terdakwa telah mengajukan"
+  - "Menimbang, bahwa terdakwa (nama)"
+  - "Menimbang, bahwa Terdakwa I (nama)"
+  - "Menimbang, bahwa Terdakwa II (nama)"
+  - "Menimbang, bahwa Terdakwa III (nama)"
 kata_sesudah:
-  - "di persidangan telah didengar keterangan"
-  - "Laporan hasil penelitian kemasyarakatan"
-  - "Penuntut Umum mengajukan barang bukti"
+  - "di persidangan"
+  - "memberikan keterangan"
 ```
 
-This field is the Anak/defendant courtroom statement, not identity data. If the
-source uses `Terdakwa` instead of `Anak`, capture the same testimony section.
+# ⚠️ Note: `(nama)` is a placeholder — match the pattern `Menimbang, bahwa [Tt]erdakwa.*` via regex.
 
-### 21. Surat
+---
+
+### 21. Surat (Alat Bukti)
 
 ```yaml
 id: 21
 bagian: "Surat"
 kata_sebelum:
-  - "mengajukan Surat"
-  - "Surat (termasuk alat bukti elektronik)"
-  - "alat bukti elektronik"
-  - "bukti surat"
+  - "mengajukan"
+  - "alat bukti"
+  - "bukti surat berupa"
+  - "melampirkan surat:"       # [variant]
 kata_sesudah:
-  - "saksi yang meringankan"
-  - "Anak/Para Anak telah mengajukan Ahli"
-  - "saksi verbalisan"
-  - "Anak/Para Anak di persidangan"
+  - "sebagai berikut:"
+  - "Menimbang bahwa"
 ```
 
-Include documentary and electronic evidence submitted by either side.
+---
 
-### 22. Petunjuk/Barang Bukti
+### 22. Petunjuk / Barang Bukti
 
 ```yaml
 id: 22
 bagian: "Petunjuk/Barang Bukti"
 kata_sebelum:
-  - "Penuntut Umum mengajukan barang bukti"
-  - "mengajukan barang bukti"
-  - "barang bukti sebagai berikut"
+  - "mengajukan"
+  - "terhadap"
+  - "diperhatikan"
 kata_sesudah:
-  - "diperoleh fakta hukum"
-  - "fakta hukum sebagai berikut"
-  - "Majelis Hakim akan mempertimbangkan"
+  - "sebagai berikut:"
+  - "berupa;"
+  - "berupa ;l"                # [OCR artifact variant]
 ```
 
-Capture the submitted goods/evidence inventory. Do not move later evidence
-disposition reasoning into this field.
+---
 
 ### 23. Fakta Hukum
 
@@ -512,16 +522,21 @@ id: 23
 bagian: "Fakta Hukum"
 aliases:
   - "fakta-fakta hukum"
+  - "bahwa dalam persidangan,"
 kata_sebelum:
-  - "diperoleh fakta hukum sebagai berikut"
-  - "fakta hukum sebagai berikut"
-  - "berdasarkan keterangan saksi-saksi"
+  - "Menimbang"
+  - "berdasarkan"
+  - "disimpulkan adanya"
 kata_sesudah:
-  - "Hakim/Majelis Hakim akan mempertimbangkan"
-  - "Majelis Hakim akan mempertimbangkan"
-  - "DAKWAAN TUNGGAL"
-  - "DAKWAAN ALTERNATIF"
+  - "Majelis Hakim"
+  - "tersebut diatas"
+  - "serta didukung dengan bukti"
+  - "-fakta dalam perkara"
+  - "dalam perkara ini"
+  - "sebagai berikut;"
 ```
+
+---
 
 ### 24. Pertimbangan Hukum
 
@@ -531,22 +546,18 @@ bagian: "Pertimbangan Hukum"
 aliases:
   - "pertimbangan"
 kata_sebelum:
-  - "Hakim/Majelis Hakim akan mempertimbangkan"
-  - "Majelis Hakim akan mempertimbangkan"
-  - "DAKWAAN TUNGGAL"
-  - "DAKWAAN ALTERNATIF"
-  - "DAKWAAN SUBSIDAIRITAS"
-  - "DAKWAAN KUMULATIF"
-  - "DAKWAAN GABUNGAN"
+  - "Menimbang,"
+  - "uraian"
+  - "Majelis Hakim akan"
+  - "sebagai berikut"
+  - "mempertimbangakan"        # [typo variant — OCR artifact]
 kata_sesudah:
-  - "MENGADILI"
-  - "M E N G A D I L I"
+  - "tersebut di atas"
+  - "Ad."
+  - "apakah berdasarkan fakta-fakta hukum"
 ```
 
-Include element analysis, conclusions, Anak-specific sanctions/social inquiry
-reasoning, detention consequence reasoning, evidence disposition reasoning,
-aggravating/mitigating factors, costs, and `Mengingat...` up to but not
-including `MENGADILI`.
+---
 
 ### 25. Amar Putusan
 
@@ -557,14 +568,14 @@ kata_sebelum:
   - "MENGADILI"
   - "MENGADILI:"
   - "MENGADILI;"
-  - "M E N G A D I L I"
-  - "M E N G A D I L I :"
+  - "M E N G A D I L I"       # [spaced — OCR artifact]
+  - "M E N G A D I L I :"     # [spaced variant]
+  - "M E N G A D I L I:"      # [spaced variant]
 kata_sesudah:
   - "Demikianlah diputuskan"
 ```
 
-Include every numbered operative order. For Anak convictions, include juvenile
-sentence/sanction, detention status, evidence disposition, and costs.
+---
 
 ### 26. Hari
 
@@ -572,13 +583,12 @@ sentence/sanction, detention status, evidence disposition, and costs.
 id: 26
 bagian: "Hari"
 kata_sebelum:
-  - "pada hari"
-  - "pada hari ini"
+  - "pada"
 kata_sesudah:
   - ", tanggal"
 ```
 
-Use the deliberation decision date unless the task explicitly asks otherwise.
+---
 
 ### 27. Tanggal
 
@@ -586,11 +596,12 @@ Use the deliberation decision date unless the task explicitly asks otherwise.
 id: 27
 bagian: "Tanggal"
 kata_sebelum:
-  - "tanggal"
+  - "hari, tanggal"
 kata_sesudah:
   - "bulan"
-  - ", oleh"
 ```
+
+---
 
 ### 28. Tahun
 
@@ -604,6 +615,8 @@ kata_sesudah:
   - "oleh"
 ```
 
+---
+
 ### 29. Siapa yang Memutus
 
 ```yaml
@@ -611,14 +624,13 @@ id: 29
 bagian: "Siapa yang Memutus"
 kata_sebelum:
   - "oleh"
-  - "oleh kami"
+  - "oleh kami,"
 kata_sesudah:
-  - "selaku Hakim Ketua"
-  - "sebagai Hakim Ketua"
-  - "masing-masing sebagai Hakim Anggota"
+  - ", sebagai hakim"
+  - "sebagai hakim"
 ```
 
-Prefer the judges in the deliberation formula after `Demikianlah diputuskan`.
+---
 
 ### 30. Panitera Pengganti
 
@@ -626,14 +638,13 @@ Prefer the judges in the deliberation formula after `Demikianlah diputuskan`.
 id: 30
 bagian: "Panitera Pengganti"
 kata_sebelum:
+  - "Panitera"
   - "dibantu oleh"
-  - "Panitera Pengganti"
 kata_sesudah:
-  - "serta dihadiri"
-  - "Penuntut Umum"
-  - "Hakim Ketua"
-  - "Hakim"
+  - "pada Pengadilan Negeri"
 ```
+
+---
 
 ### 31. Tanda Tangan Majelis
 
@@ -642,23 +653,57 @@ id: 31
 bagian: "Tanda Tangan Majelis"
 kata_sebelum:
   - "Hakim Ketua,"
-  - "Hakim,"
-  - "Panitera Pengganti,"
 kata_sesudah:
-  - "Catatan:"
-  - "Untuk putusan perkara anak"
+  - "Panitera Pengganti,"
 ```
 
-Capture the signature block containing judge(s) and substitute clerk.
+---
 
-## Verification Checklist
+## Quick Reference Table
 
-Before checkpointing a source:
+| ID | Bagian Putusan | Sample Kata Sebelum | Sample Kata Sesudah |
+|----|----------------|---------------------|---------------------|
+| 1 | Judul | _(start of doc)_ | Nomor |
+| 2 | Nomor Putusan | Putusan | Pengadilan |
+| 3 | Irah-irah | PN | Pengadilan Negeri |
+| 4 | Nama Pengadilan Negeri | Esa | yang mengadili perkara |
+| 5 | Keterangan Perkara | Mengadili | dengan |
+| 6 | Nama Lengkap | 1. Nama lengkap | 2. tempat |
+| 7 | Tempat Lahir | 2. tempat | 3. umur |
+| 8 | Umur/Tanggal Lahir | 3. umur | 4. Jenis |
+| 9 | Jenis Kelamin | 4. Jenis | 5. kebangsaan |
+| 10 | Kebangsaan | 5. kebangsaan | 6. tempat |
+| 11 | Tempat Tinggal | 6. tempat | 7. Agama |
+| 12 | Agama | 7. Agama | 8. pekerjaan |
+| 13 | Pekerjaan | 8. pekerjaan | terdakwa ditangkap |
+| 14 | Penangkapan | ditangkap sejak | tanggal |
+| 15 | Penahanan | dalam tahanan | oleh : |
+| 16 | Tuntutan | mendengar pembacaan | pidana |
+| 17 | Dakwaan | berdasarkan surat | Penuntut Umum |
+| 18 | Saksi | mengajukan | -Saksi |
+| 19 | Ahli | alat bukti | sebagai berikut: |
+| 20 | Terdakwa | Menimbang, bahwa terdakwa... | di persidangan |
+| 21 | Surat | bukti surat berupa | sebagai berikut: |
+| 22 | Petunjuk/Barang Bukti | diperhatikan | berupa; |
+| 23 | Fakta Hukum | Menimbang | Majelis Hakim |
+| 24 | Pertimbangan Hukum | Menimbang, | tersebut di atas |
+| 25 | Amar Putusan | MENGADILI | Demikianlah diputuskan |
+| 26 | Hari | pada | , tanggal |
+| 27 | Tanggal | hari, tanggal | bulan |
+| 28 | Tahun | bulan | , oleh |
+| 29 | Siapa yang Memutus | oleh | , sebagai hakim |
+| 30 | Panitera Pengganti | Panitera | pada Pengadilan Negeri |
+| 31 | Tanda Tangan Majelis | Hakim Ketua, | Panitera Pengganti, |
 
-- The JSON has exactly all 31 section keys.
-- Every non-empty section string appears verbatim and contiguously in the raw
-  source text.
-- `empty_sections` contains exactly the keys whose arrays are empty.
-- The output filename matches the source stem.
-- The checkpoint record identifies the same source, hash, output path, status,
-  method, and empty sections.
+---
+
+## Edge Cases & Known OCR Artifacts
+
+| Issue | Example | Handling |
+|-------|---------|----------|
+| Letter-spaced text | `M E N G A D I L I` | Normalize by removing spaces before match |
+| Typos from OCR | `sebgai berikut:` | Include as explicit variant in list |
+| Misspelling | `mempertimbangakan` | Include as explicit variant in list |
+| Numbered field prefixes | `1. Nama lengkap` | Strip leading `\d+\.\s` before match OR match with optional prefix |
+| Regex-needed patterns | `Menimbang, bahwa Terdakwa I (nama)` | Use pattern: `Menimbang, bahwa [Tt]erdakwa\s*(I{1,3})?\s*\(nama\)` |
+| Pendidikan field | Appears between Kebangsaan (#10) and Tempat Tinggal (#11) in some putusan | Handle as optional field between #10 and #11 |

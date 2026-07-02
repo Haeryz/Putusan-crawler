@@ -26,6 +26,8 @@ anak-glm-aggregate = "llm_aggregator.anak_glm:main"
 tppo-glm-aggregate = "llm_aggregator.tppo_glm:main"
 anak-qwen-aggregate = "llm_aggregator.anak_qwen:main"
 tppo-qwen-aggregate = "llm_aggregator.tppo_qwen:main"
+asusila-deepseek-aggregate = "llm_aggregator.asusila_deepseek:main"
+asusila-qwen-aggregate = "llm_aggregator.asusila_qwen:main"
 
 [build-system]
 requires = ["hatchling"]

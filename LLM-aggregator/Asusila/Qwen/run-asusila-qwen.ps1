@@ -19,11 +19,11 @@ $ErrorActionPreference = "Stop"
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 Set-Location -LiteralPath $RepositoryRoot
 
-$PauseFile = "LLM-aggregator/Anak/Qwen/pause"
-$InputDir = "downloads/kasus anak/raw-text"
-$OutputDir = "LLM-aggregator/Anak/Qwen/output"
-$StateFile = "LLM-aggregator/Anak/Qwen/progress.jsonl"
-$EnvFile = "LLM-aggregator/Anak/Deepseek/.env"
+$PauseFile = "LLM-aggregator/Asusila/Qwen/pause"
+$InputDir = "downloads/Asusila/raw-text"
+$OutputDir = "LLM-aggregator/Asusila/Qwen/output"
+$StateFile = "LLM-aggregator/Asusila/Qwen/progress.jsonl"
+$EnvFile = "LLM-aggregator/Asusila/Deepseek/.env"
 
 if ($Action -eq "Pause") {
     New-Item -ItemType File -Force -Path $PauseFile | Out-Null
@@ -37,7 +37,7 @@ if ($Action -eq "Resume") {
 }
 
 $PythonArguments = @(
-    "-m", "llm_aggregator.anak_qwen",
+    "-m", "llm_aggregator.asusila_qwen",
     "--input-dir", $InputDir,
     "--output-dir", $OutputDir,
     "--state", $StateFile,

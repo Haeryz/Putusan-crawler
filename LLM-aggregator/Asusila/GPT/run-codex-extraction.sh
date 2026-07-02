@@ -4,17 +4,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
-CORPUS="Anak"
-INPUT_DIR="downloads/kasus anak/raw-text"
-OUTPUT_DIR="LLM-aggregator/Anak/GPT/output"
-REPORTS_DIR="LLM-aggregator/Anak/GPT/reports"
-SPANS_DIR="LLM-aggregator/Anak/GPT/.spans"
-PROGRESS_FILE="LLM-aggregator/Anak/GPT/progress.jsonl"
-SCHEMA_FILE="LLM-aggregator/Anak/GPT/Anak.json"
-INSTRUCTION_FILE="LLM-aggregator/Anak/GPT/CODEX_EXTRACTION_INSTRUCTIONS.md"
-SPEC_FILE="LLM-aggregator/Anak/GPT/SPAN_EXTRACTION_SPEC.md"
-LIB_SCRIPT="LLM-aggregator/Anak/GPT/lib/anak_extract.py"
-FORMAT_GUIDE="SKKMA PDF"
+CORPUS="Asusila"
+INPUT_DIR="downloads/Asusila/raw-text"
+OUTPUT_DIR="LLM-aggregator/Asusila/GPT/output"
+REPORTS_DIR="LLM-aggregator/Asusila/GPT/reports"
+SPANS_DIR="LLM-aggregator/Asusila/GPT/.spans"
+PROGRESS_FILE="LLM-aggregator/Asusila/GPT/progress.jsonl"
+SCHEMA_FILE="LLM-aggregator/Asusila/GPT/Asusila.json"
+INSTRUCTION_FILE="LLM-aggregator/Asusila/GPT/CODEX_EXTRACTION_INSTRUCTIONS.md"
+SPEC_FILE="LLM-aggregator/Asusila/GPT/SPAN_EXTRACTION_SPEC.md"
+LIB_SCRIPT="LLM-aggregator/Asusila/GPT/lib/asusila_extract.py"
+FORMAT_GUIDE="Pidana Biasa Format KKMA PDF"
 
 ACTION="Run"
 TARGET=0
@@ -186,7 +186,7 @@ span_prompt() {
   local spec
   spec="$(<"$SPEC_FILE")"
   cat <<EOF
-You are Codex running the token-optimized Anak span-extraction task in:
+You are Codex running the token-optimized Asusila span-extraction task in:
 $ROOT
 
 Assigned source: $INPUT_DIR/$source_name
@@ -214,7 +214,7 @@ EOF
 legacy_prompt() {
   local source_name="$1"
   cat <<EOF
-You are Codex running the Anak GPT extraction loop in repository:
+You are Codex running the Asusila GPT extraction loop in repository:
 $ROOT
 
 This is not a documentation task. Execute the extraction loop.
@@ -222,7 +222,7 @@ This is not a documentation task. Execute the extraction loop.
 Authoritative files:
 - Instructions: $INSTRUCTION_FILE
 - JSON Schema: $SCHEMA_FILE
-- Anak section guide: LLM-aggregator/Anak/GPT/Putusan-schema.md
+- Asusila section guide: LLM-aggregator/Asusila/GPT/Putusan-schema.md
 - Raw text input: $INPUT_DIR
 - Per-source output directory: $OUTPUT_DIR
 - Checkpoint JSONL: $PROGRESS_FILE
@@ -232,7 +232,7 @@ Session assignment:
 Process this exact source file in this session: $INPUT_DIR/$source_name. Do not choose or process any other source file.
 
 Loop contract:
-1. Read $INSTRUCTION_FILE, LLM-aggregator/Anak/GPT/Putusan-schema.md, and $SCHEMA_FILE before extracting.
+1. Read $INSTRUCTION_FILE, LLM-aggregator/Asusila/GPT/Putusan-schema.md, and $SCHEMA_FILE before extracting.
 2. Confirm the assigned source is not already completed in $PROGRESS_FILE and does not already have a JSON file in $OUTPUT_DIR.
 3. Process exactly one pending source in this Codex session.
 4. For the current source, manually extract all 31 sections as exact contiguous source excerpts.

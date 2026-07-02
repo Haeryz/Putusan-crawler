@@ -51,6 +51,9 @@ LLM-aggregator/**/.spans/
 !LLM-aggregator/TPPO/GPT/output/**
 !LLM-aggregator/Anak/GPT/output/
 !LLM-aggregator/Anak/GPT/output/**
+!LLM-aggregator/Asusila/GPT/progress.jsonl
+!LLM-aggregator/Asusila/GPT/output/
+!LLM-aggregator/Asusila/GPT/output/**
 
 # Generated artifacts and dependency installs
 outputs/

@@ -1,4 +1,4 @@
-# Codex Anak Extraction Instructions
+# Codex Asusila (Pidana Biasa) Extraction Instructions
 
 Use this file as the full task instruction.
 
@@ -14,7 +14,7 @@ every section/boundary decision; nothing is offloaded to another model.
 
 Per source, the launcher:
 
-1. Runs `lib/anak_extract.py clean` to strip the repeated Mahkamah Agung
+1. Runs `lib/asusila_extract.py clean` to strip the repeated Mahkamah Agung
    boilerplate (disclaimer, page headers/footers, form-feeds — ~25-30% of every
    file) and number the remaining lines.
 2. Sends the cleaned, line-numbered source INLINE in the prompt with the compact
@@ -23,8 +23,8 @@ Per source, the launcher:
 3. Codex writes ONLY a small spans JSON (`.spans/<stem>.spans.json`) of
    per-section line ranges / short literals — a few hundred output tokens
    instead of re-emitting tens of thousands.
-4. Runs `lib/anak_extract.py expand` to slice the exact excerpts, build the
-   `Anak.json`-conforming output, validate it structurally, and append the
+4. Runs `lib/asusila_extract.py expand` to slice the exact excerpts, build the
+   `Asusila.json`-conforming output, validate it structurally, and append the
    checkpoint. Short literals are snapped back to the exact source substring, so
    excerpts are 100% verbatim.
 
@@ -39,27 +39,27 @@ generative loop (the rest of this document).
 
 ## Objective
 
-Manually extract Indonesian juvenile court decision sections into individual
+Manually extract Indonesian ordinary-criminal (Pidana Biasa) court decision sections into individual
 JSON artifacts. Each processed raw-text source must produce exactly one JSON
 file under:
 
-`LLM-aggregator/Anak/GPT/output/<source-stem>.json`
+`LLM-aggregator/Asusila/GPT/output/<source-stem>.json`
 
 Each output file must conform to:
 
-`LLM-aggregator/Anak/GPT/Anak.json`
+`LLM-aggregator/Asusila/GPT/Asusila.json`
 
-Follow the Anak section schema and boundary guide in:
+Follow the Asusila section schema and boundary guide in:
 
-`LLM-aggregator/Anak/GPT/Putusan-schema.md`
+`LLM-aggregator/Asusila/GPT/Putusan-schema.md`
 
-Use the Anak official format context from:
+Use the Pidana Biasa official format context from:
 
-`LLM-aggregator/Anak/SKKMA Pidsus Anak-1.pdf`
+`LLM-aggregator/Asusila/Pidana Biasa Format KKMA.pdf`
 
 Source documents are already extracted as raw text in:
 
-`downloads/kasus anak/raw-text`
+`downloads/Asusila/raw-text`
 
 Do not waste time extracting from PDFs unless the raw text is missing or
 unreadable.
@@ -70,41 +70,41 @@ On macOS/Linux, start or resume the automated Codex extraction loop with the
 native Python launcher:
 
 ```bash
-python3 run_extractions.py --corpus Anak
+python3 run_extractions.py --corpus Asusila
 ```
 
 For single-click/shell-wrapper usage on macOS/Linux, run:
 
 ```bash
-./LLM-aggregator/Anak/GPT/run-codex-extraction.sh
+./LLM-aggregator/Asusila/GPT/run-codex-extraction.sh
 ```
 
 On Windows PowerShell, use:
 
 ```powershell
-.\LLM-aggregator\Anak\GPT\run-codex-extraction.ps1
+.\LLM-aggregator\Asusila\GPT\run-codex-extraction.ps1
 ```
 
 For Windows Explorer/double-click usage, run:
 
 ```cmd
-LLM-aggregator\Anak\GPT\run-codex-extraction.cmd
+LLM-aggregator\Asusila\GPT\run-codex-extraction.cmd
 ```
 
 The launcher calls `codex exec` non-interactively, gives Codex this extraction
-loop, and writes outputs/checkpoints in the Anak GPT directory. It resumes from
+loop, and writes outputs/checkpoints in the Asusila GPT directory. It resumes from
 existing `progress.jsonl` records and `GPT/output/*.json` files, so rerunning
 the launcher continues pending files.
 
 Useful controls:
 
 ```bash
-python3 run_extractions.py --corpus Anak --status
-./LLM-aggregator/Anak/GPT/run-codex-extraction.sh --status
-.\LLM-aggregator\Anak\GPT\run-codex-extraction.ps1 -Action Prompt
-python3 run_extractions.py --corpus Anak --target 1
-python3 run_extractions.py --corpus Anak --target 10
-python3 run_extractions.py --corpus Anak --model gpt-5-codex
+python3 run_extractions.py --corpus Asusila --status
+./LLM-aggregator/Asusila/GPT/run-codex-extraction.sh --status
+.\LLM-aggregator\Asusila\GPT\run-codex-extraction.ps1 -Action Prompt
+python3 run_extractions.py --corpus Asusila --target 1
+python3 run_extractions.py --corpus Asusila --target 10
+python3 run_extractions.py --corpus Asusila --model gpt-5-codex
 ```
 
 With no target, the launcher processes all pending sources one at a time until
@@ -127,19 +127,19 @@ source files inside a single Codex session.
 
 Loop steps:
 
-1. Discover pending files by comparing `downloads/kasus anak/raw-text/*.txt`
-   against completed records in `LLM-aggregator/Anak/GPT/progress.jsonl` and
-   existing JSON files in `LLM-aggregator/Anak/GPT/output/`.
+1. Discover pending files by comparing `downloads/Asusila/raw-text/*.txt`
+   against completed records in `LLM-aggregator/Asusila/GPT/progress.jsonl` and
+   existing JSON files in `LLM-aggregator/Asusila/GPT/output/`.
 2. Preassign one distinct source file to each target Codex session in
    deterministic filename order.
 3. Each Codex session reads only its assigned source file.
 4. Extract all 31 fields into one JSON object using exact contiguous source
    excerpts.
-5. Save the result as `LLM-aggregator/Anak/GPT/output/<source-stem>.json`.
-6. Verify the output against `LLM-aggregator/Anak/GPT/Anak.json`, including all
+5. Save the result as `LLM-aggregator/Asusila/GPT/output/<source-stem>.json`.
+6. Verify the output against `LLM-aggregator/Asusila/GPT/Asusila.json`, including all
    31 section keys and accurate `empty_sections`.
 7. Append one completed JSONL checkpoint record to
-   `LLM-aggregator/Anak/GPT/progress.jsonl`.
+   `LLM-aggregator/Asusila/GPT/progress.jsonl`.
 8. Check current Codex/session usage before starting the next file.
 9. Continue with the next pending file only if the usage guard has not
    triggered.
@@ -151,7 +151,7 @@ Usage guard:
 - If `/status` text is unavailable to the non-interactive launcher, the
   270-minute wall-clock fallback stops before starting another source.
 - Do not begin a large source when usage is already under the 10% threshold.
-- Create a Markdown run report under `LLM-aggregator/Anak/GPT/reports/` before
+- Create a Markdown run report under `LLM-aggregator/Asusila/GPT/reports/` before
   the final response.
 - The report must include stop reason, usage remaining, reset timing if
   visible, processed count in this run, completed output paths, last source
@@ -191,67 +191,71 @@ Not allowed:
 - Do not write reasoning inside section values.
 - Do not write anything beside actual extraction into section values.
 
-## Anak Format Context
+## Pidana Biasa Format Context
 
-The Anak PDF format file is not a source decision to extract into the JSON
-output. It is a guide for how Anak decisions are usually ordered and where
-section boundaries normally fall.
+The Pidana Biasa PDF format file is not a source decision to extract into the
+JSON output. It is a guide for how ordinary-criminal (`Pid.B`) decisions are
+usually ordered and where section boundaries normally fall.
 
-Common Anak decision variants in the format:
+Common Pidana Biasa decision variants in the format:
 
-- `Pid.I.B.1 Anak - Vrijspraak`: acquittal.
-- `Pid.I.B.2 Anak - Lepas`: release from all legal charges.
-- `Pid.I.B.3 Anak - Terbukti`: conviction.
+- `Pid.I.A.1.1 Biasa-Vrijspraak`: acquittal.
+- `Pid.I.A.1.2 (Format Biasa Lepas)`: release from all legal charges.
+- `Pid.I.A.1.3 Format Biasa - Terbukti`: conviction.
 
 Use this expected order to resolve ambiguous boundaries:
 
 1. `P U T U S A N` / `PUTUSAN`, case number, irah-irah, court name, and case
-   description.
-2. Numbered Anak identity fields: `1. Nama lengkap` through `8. Pekerjaan`.
-3. Optional arrest sentence and detention history in LPAS/LPKS.
-4. Counsel/assistance status: Penasihat Hukum, orangtua/wali/pendamping,
-   pemberi bantuan hukum, and Pembimbing Kemasyarakatan.
-5. Procedural review: Penetapan Ketua PN, Penetapan Hari Sidang, case file,
-   social inquiry report, witnesses/experts/Anak statement, parents/guardian,
-   letters, and goods.
-6. Prosecution demand.
-7. Defense, leniency request, prosecution reply, and Anak reply if present.
+   description (`Pengadilan Negeri … yang mengadili perkara pidana dengan acara
+   pemeriksaan biasa … dalam perkara Terdakwa/Para Terdakwa`).
+2. Numbered defendant identity fields: `1. Nama lengkap` through `8. Pekerjaan`.
+3. Optional arrest sentence and detention history (Rumah Tahanan Negara), up to
+   12 detention stages.
+4. Counsel status: Penasihat Hukum appointed, no counsel, or refusal of counsel.
+5. Procedural review: `Setelah membaca` (Penetapan Penunjukan Majelis Hakim,
+   Penetapan Hari Sidang, case file), then the witnesses/experts/defendant/
+   evidence hearing sentence.
+6. Prosecution demand (`Setelah mendengar pembacaan tuntutan pidana`).
+7. Defense (pembelaan), leniency request, prosecution reply, and defendant reply
+   if present.
 8. Dakwaan.
-9. Evidence sequence: witnesses, experts, documentary/electronic evidence,
-   defense evidence, verbalisan witness, Anak statement, parent/guardian or
-   companion statement, social inquiry report, goods/evidence list.
-10. Facts.
-11. Legal consideration and element analysis under dakwaan forms.
-12. Anak-specific sanctions/social-inquiry reasoning, detention reasoning,
-   evidence-disposition reasoning, aggravating/mitigating factors, costs, and
-   `Mengingat...`.
+9. Evidence sequence: prosecution witnesses, experts, documentary/electronic
+   evidence, defendant statement, defense witnesses/experts/documents,
+   verbalisan witness, and prosecution goods/evidence list.
+10. Facts (`diperoleh fakta hukum sebagai berikut`).
+11. Legal consideration and element analysis under dakwaan forms (`DAKWAAN
+   TUNGGAL/ALTERNATIF/SUBSIDAIRITAS/KUMULATIF/GABUNGAN`), including `Ad.1/Ad.2…`.
+12. Evidence-disposition reasoning, aggravating/mitigating factors, costs, any
+   restitution/compensation consideration where applicable, and `Mengingat...`.
 13. `MENGADILI` operative orders.
 14. `Demikianlah diputuskan...` closing paragraph and signature block.
 
 ## Field-Level Extraction Context
 
-- Fields 6-13, Anak identity: extract only the value for that identity field.
-  For multiple Anak, put all values in the same section array in document
-  order, preserving labels such as `Anak I` when present.
+- Fields 6-13, defendant identity: extract only the value for that identity
+  field. For multiple defendants, put all values in the same section array in
+  document order, preserving labels such as `Terdakwa I` when present.
 - Field 10, Kebangsaan: treat `Kewarganegaraan` as the same field. Stop before
   an optional `Pendidikan` line if present.
 - Field 14, Penangkapan: include only arrest wording and dates. Do not include
   detention stages here.
-- Field 15, Penahanan: include every LPAS/LPKS detention stage and extension,
-  plus penangguhan, pembantaran, pengalihan penahanan, or detention in another
-  case if present.
+- Field 15, Penahanan: include every detention stage and extension (Penyidik,
+  Perpanjangan Penuntut Umum, Ketua Pengadilan Negeri, Hakim/Majelis Hakim,
+  Ketua Pengadilan Tinggi — up to 12 stages), plus penangguhan, pembantaran,
+  pengalihan penahanan, or detention in another case if present.
 - Field 16, Tuntutan: extract the copied prosecution demand after `Setelah
   mendengar pembacaan tuntutan pidana... pada pokoknya sebagai berikut`.
 - Field 17, Dakwaan: extract the complete charge text after `didakwa
-  berdasarkan surat dakwaan Penuntut Umum... sebagai berikut`. In short
-  procedure decisions, treat `catatan dakwaan` as dakwaan.
-- Field 18, Saksi: include prosecution witnesses, child victims, child
-  witnesses, defense witnesses, and verbalisan witnesses when present.
+  berdasarkan surat dakwaan Penuntut Umum... sebagai berikut`, including all
+  forms (tunggal, alternatif, subsidairitas, kumulatif, gabungan).
+- Field 18, Saksi: include prosecution witnesses, victims, defense witnesses
+  (`saksi yang meringankan` / `a de charge`), and verbalisan witnesses when
+  present, with oath status and the defendant's response to each.
 - Field 19, Ahli: include prosecution and defense experts, including expert
   statements read into court.
-- Field 20, Terdakwa: extract the Anak/defendant's own courtroom statement
-  beginning around `Anak/Para Anak di persidangan telah memberikan
-  keterangan...`.
+- Field 20, Terdakwa: extract the defendant's own courtroom statement beginning
+  around `Menimbang bahwa Terdakwa/Para Terdakwa* di persidangan telah
+  memberikan keterangan...`.
 - Field 21, Surat: include documentary and electronic evidence under `Surat
   (termasuk alat bukti elektronik)` or equivalent.
 - Field 22, Petunjuk/Barang Bukti: include the submitted goods/evidence
@@ -259,10 +263,11 @@ Use this expected order to resolve ambiguous boundaries:
   berikut`.
 - Field 23, Fakta Hukum: starts at `diperoleh fakta hukum sebagai berikut` and
   ends before the court starts legal/element analysis.
-- Field 24, Pertimbangan Hukum: includes dakwaan element analysis, conclusions,
-  Anak sanction/social inquiry reasoning, detention reasoning, evidence
-  disposition reasoning, aggravating/mitigating factors, costs, and
-  `Mengingat...` up to but not including `MENGADILI`.
+- Field 24, Pertimbangan Hukum: includes dakwaan element analysis, conclusions
+  on whether unsur are fulfilled, any alasan pembenar/pemaaf or restitution/
+  compensation reasoning, detention reasoning, evidence disposition reasoning,
+  aggravating/mitigating factors, costs, and `Mengingat...` up to but not
+  including `MENGADILI`.
 - Field 25, Amar Putusan: starts at `MENGADILI` and includes every numbered
   operative order.
 - Fields 26-31, closing fields: parse from `Demikianlah diputuskan...` and the
@@ -277,7 +282,7 @@ Use this output shape:
 {
   "status": "completed",
   "source_file": "example.txt",
-  "source_path": "downloads/kasus anak/raw-text/example.txt",
+  "source_path": "downloads/Asusila/raw-text/example.txt",
   "source_sha256": "<64 hex chars>",
   "sections": {
     "judul": [],
@@ -318,7 +323,7 @@ Use this output shape:
 ```
 
 Every section value is an array. Put exact copied source excerpts in the array.
-Use multiple array items only for multiple Anak or genuinely separate
+Use multiple array items only for multiple Terdakwa or genuinely separate
 occurrences. Use `[]` only when no exact source excerpt exists after checking
 the field label, schema boundaries, aliases, and OCR variants.
 

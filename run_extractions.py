@@ -85,6 +85,19 @@ CORPORA: dict[str, dict] = {
         "spec": "LLM-aggregator/Anak/GPT/SPAN_EXTRACTION_SPEC.md",
         "lib": "LLM-aggregator/Anak/GPT/lib/anak_extract.py",
     },
+    "Asusila": {
+        "label": "Asusila",
+        "guide": "Pidana Biasa Format KKMA PDF",
+        "input_dir": "downloads/Asusila/raw-text",
+        "out_dir": "LLM-aggregator/Asusila/GPT/output",
+        "reports_dir": "LLM-aggregator/Asusila/GPT/reports",
+        "logs_dir": "LLM-aggregator/Asusila/GPT/logs",
+        "spans_dir": "LLM-aggregator/Asusila/GPT/.spans",
+        "progress": "LLM-aggregator/Asusila/GPT/progress.jsonl",
+        "instruction": "LLM-aggregator/Asusila/GPT/CODEX_EXTRACTION_INSTRUCTIONS.md",
+        "spec": "LLM-aggregator/Asusila/GPT/SPAN_EXTRACTION_SPEC.md",
+        "lib": "LLM-aggregator/Asusila/GPT/lib/asusila_extract.py",
+    },
 }
 
 
@@ -973,7 +986,7 @@ def run_corpus(cfg: dict, codex: str, args: list[str], env: dict, target: int,
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Run the TPPO + Anak Codex span extractors (native Python).")
     ap.add_argument("--target", type=int, default=0, help="Sources to process per corpus; 0 means all pending until the usage guard stops (default 0).")
-    ap.add_argument("--corpus", choices=["TPPO", "Anak", "both"], default="both")
+    ap.add_argument("--corpus", choices=["TPPO", "Anak", "Asusila", "both", "all"], default="both")
     ap.add_argument("--model", default="gpt-5.4-mini", help='Codex model (default "gpt-5.4-mini"; "" for the Codex CLI default).')
     ap.add_argument("--reasoning-effort", default="low", help='Codex model_reasoning_effort (default "low"; "" for model default).')
     ap.add_argument("--jobs", type=int, default=1, help="Max parallel Codex sessions per corpus (default 1).")
@@ -989,7 +1002,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--status", action="store_true", help="Show counts for each corpus and exit.")
     a = ap.parse_args(argv)
 
-    names = ["TPPO", "Anak"] if a.corpus == "both" else [a.corpus]
+    if a.corpus == "both":
+        names = ["TPPO", "Anak"]  # legacy default kept for backward compatibility
+    elif a.corpus == "all":
+        names = ["TPPO", "Anak", "Asusila"]
+    else:
+        names = [a.corpus]
 
     if a.status:
         for name in names:
@@ -1051,7 +1069,7 @@ def main(argv: list[str] | None = None) -> int:
     if overall:
         print("Completed with failures. See the messages/logs above.")
     else:
-        print("Both extractors finished." if len(names) > 1 else f"{names[0]} extractor finished.")
+        print("All extractors finished." if len(names) > 1 else f"{names[0]} extractor finished.")
     return overall
 
 
