@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sinergi.local/schema/anak-codex-extraction.schema.json",
+  "title": "Codex Anak Court Decision Extraction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "source_file",
+    "source_path",
+    "source_sha256",
+    "sections",
+    "empty_sections",
+    "method"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["completed", "no_text", "failed"]
+    },
+    "source_file": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Raw text filename, for example 10_Pid.Sus-Anak_2021_PN_Unh.txt."
+    },
+    "source_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Repository-relative path to the raw text source."
+    },
+    "source_sha256": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "sections": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "judul",
+        "nomor_putusan",
+        "irah_irah",
+        "nama_pengadilan_negeri",
+        "keterangan_perkara",
+        "nama_lengkap",
+        "tempat_lahir",
+        "umur_tanggal_lahir",
+        "jenis_kelamin",
+        "kebangsaan",
+        "tempat_tinggal",
+        "agama",
+        "pekerjaan",
+        "penangkapan",
+        "penahanan",
+        "tuntutan",
+        "dakwaan",
+        "saksi",
+        "ahli",
+        "terdakwa",
+        "surat",
+        "petunjuk_barang_bukti",
+        "fakta_hukum",
+        "pertimbangan_hukum",
+        "amar_putusan",
+        "hari",
+        "tanggal",
+        "tahun",
+        "siapa_yang_memutus",
+        "panitera_pengganti",
+        "tanda_tangan_majelis"
+      ],
+      "properties": {
+        "judul": { "$ref": "#/$defs/extracts" },
+        "nomor_putusan": { "$ref": "#/$defs/extracts" },
+        "irah_irah": { "$ref": "#/$defs/extracts" },
+        "nama_pengadilan_negeri": { "$ref": "#/$defs/extracts" },
+        "keterangan_perkara": { "$ref": "#/$defs/extracts" },
+        "nama_lengkap": { "$ref": "#/$defs/extracts" },
+        "tempat_lahir": { "$ref": "#/$defs/extracts" },
+        "umur_tanggal_lahir": { "$ref": "#/$defs/extracts" },
+        "jenis_kelamin": { "$ref": "#/$defs/extracts" },
+        "kebangsaan": { "$ref": "#/$defs/extracts" },
+        "tempat_tinggal": { "$ref": "#/$defs/extracts" },
+        "agama": { "$ref": "#/$defs/extracts" },
+        "pekerjaan": { "$ref": "#/$defs/extracts" },
+        "penangkapan": { "$ref": "#/$defs/extracts" },
+        "penahanan": { "$ref": "#/$defs/extracts" },
+        "tuntutan": { "$ref": "#/$defs/extracts" },
+        "dakwaan": { "$ref": "#/$defs/extracts" },
+        "saksi": { "$ref": "#/$defs/extracts" },
+        "ahli": { "$ref": "#/$defs/extracts" },
+        "terdakwa": { "$ref": "#/$defs/extracts" },
+        "surat": { "$ref": "#/$defs/extracts" },
+        "petunjuk_barang_bukti": { "$ref": "#/$defs/extracts" },
+        "fakta_hukum": { "$ref": "#/$defs/extracts" },
+        "pertimbangan_hukum": { "$ref": "#/$defs/extracts" },
+        "amar_putusan": { "$ref": "#/$defs/extracts" },
+        "hari": { "$ref": "#/$defs/extracts" },
+        "tanggal": { "$ref": "#/$defs/extracts" },
+        "tahun": { "$ref": "#/$defs/extracts" },
+        "siapa_yang_memutus": { "$ref": "#/$defs/extracts" },
+        "panitera_pengganti": { "$ref": "#/$defs/extracts" },
+        "tanda_tangan_majelis": { "$ref": "#/$defs/extracts" }
+      }
+    },
+    "empty_sections": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/section_key" },
+      "description": "Section keys whose section array is empty."
+    },
+    "method": {
+      "type": "string",
+      "const": "codex_manual_extractive"
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional operational notes only; do not put reasoning or summaries in sections."
+    }
+  },
+  "$defs": {
+    "extracts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Exact contiguous source excerpt copied from the raw text. Do not summarize, translate, normalize, or explain."
+      }
+    },
+    "section_key": {
+      "type": "string",
+      "enum": [
+        "judul",
+        "nomor_putusan",
+        "irah_irah",
+        "nama_pengadilan_negeri",
+        "keterangan_perkara",
+        "nama_lengkap",
+        "tempat_lahir",
+        "umur_tanggal_lahir",
+        "jenis_kelamin",
+        "kebangsaan",
+        "tempat_tinggal",
+        "agama",
+        "pekerjaan",
+        "penangkapan",
+        "penahanan",
+        "tuntutan",
+        "dakwaan",
+        "saksi",
+        "ahli",
+        "terdakwa",
+        "surat",
+        "petunjuk_barang_bukti",
+        "fakta_hukum",
+        "pertimbangan_hukum",
+        "amar_putusan",
+        "hari",
+        "tanggal",
+        "tahun",
+        "siapa_yang_memutus",
+        "panitera_pengganti",
+        "tanda_tangan_majelis"
+      ]
+    }
+  }
+}
