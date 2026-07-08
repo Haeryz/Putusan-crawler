@@ -1,0 +1,96 @@
+{
+  "built_at": "2026-07-08T23:02:28+00:00",
+  "seed": 3407,
+  "canonical_sections": [
+    "judul",
+    "nomor_putusan",
+    "irah_irah",
+    "nama_pengadilan_negeri",
+    "keterangan_perkara",
+    "nama_lengkap",
+    "tempat_lahir",
+    "umur_tanggal_lahir",
+    "jenis_kelamin",
+    "kebangsaan",
+    "tempat_tinggal",
+    "agama",
+    "pekerjaan",
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "fakta_hukum",
+    "pertimbangan_hukum",
+    "amar_putusan",
+    "hari",
+    "tanggal",
+    "tahun",
+    "siapa_yang_memutus",
+    "panitera_pengganti",
+    "tanda_tangan_majelis"
+  ],
+  "system_prompt": "Anda adalah pengekstrak terstruktur putusan pengadilan Indonesia. Diberikan badan teks putusan, keluarkan SATU objek JSON dengan tepat 31 kunci bagian (dalam urutan kanonik). Setiap nilai adalah daftar kutipan verbatim (extractive) yang disalin persis dari teks sumber — jangan pernah memparafrasekan, meringkas, atau mengarang. Jika sebuah bagian tidak ada, gunakan daftar kosong dan cantumkan kuncinya di 'empty_sections'. Kunci bagian, dalam urutan: judul, nomor_putusan, irah_irah, nama_pengadilan_negeri, keterangan_perkara, nama_lengkap, tempat_lahir, umur_tanggal_lahir, jenis_kelamin, kebangsaan, tempat_tinggal, agama, pekerjaan, penangkapan, penahanan, tuntutan, dakwaan, saksi, ahli, terdakwa, surat, petunjuk_barang_bukti, fakta_hukum, pertimbangan_hukum, amar_putusan, hari, tanggal, tahun, siapa_yang_memutus, panitera_pengganti, tanda_tangan_majelis.",
+  "purpose_fractions": {
+    "sft": 0.7,
+    "grpo": 0.15,
+    "rag": 0.15
+  },
+  "split_fractions": {
+    "train": 0.8,
+    "val": 0.1,
+    "test": 0.1
+  },
+  "expected_rows": 4500,
+  "total_rows": 4407,
+  "unique_documents": 2976,
+  "rows_with_cross_model_fill": 144,
+  "sections_filled_cross_model": 209,
+  "per_dir_file_counts": {
+    "Anak/Deepseek": 483,
+    "Anak/GPT": 500,
+    "Anak/Qwen": 498,
+    "Asusila/Deepseek": 474,
+    "Asusila/GPT": 500,
+    "Asusila/Qwen": 499,
+    "TPPO/Deepseek": 484,
+    "TPPO/GPT": 500,
+    "TPPO/Qwen": 482
+  },
+  "skipped_files": [
+    "LLM-aggregator\\Anak\\GPT\\output\\1_Pid.Sus-Anak_2022_PN_Mjk.json",
+    "LLM-aggregator\\Anak\\GPT\\output\\1_Pid.Sus-Anak_2025_PN_Gto.json",
+    "LLM-aggregator\\Anak\\GPT\\output\\1_Pid.Sus-Anak_2025_PN_Pwr.json",
+    "LLM-aggregator\\TPPO\\GPT\\output\\100_Pid.Sus_2024_PN_Tbk.json",
+    "LLM-aggregator\\TPPO\\GPT\\output\\100_Pid.Sus_2025_PN_Mpw.json",
+    "LLM-aggregator\\TPPO\\GPT\\output\\101_Pid.Sus_2022_PN_Pya.json",
+    "LLM-aggregator\\TPPO\\GPT\\output\\101_Pid.Sus_2025_PN_Sbr.json",
+    "LLM-aggregator\\TPPO\\GPT\\output\\102_Pid.Sus_2025_PN_Pbm.json",
+    "LLM-aggregator\\TPPO\\GPT\\output\\102_Pid.Sus_2025_PN_Sbr.json",
+    "LLM-aggregator\\TPPO\\GPT\\output\\103_Pid.Sus_2025_PN_Bjm.json",
+    "LLM-aggregator\\TPPO\\GPT\\output\\103_Pid.Sus_2025_PN_Btm.json",
+    "LLM-aggregator\\TPPO\\GPT\\output\\104_Pid.Sus_2025_PN_Mtr.json",
+    "LLM-aggregator\\TPPO\\GPT\\output\\10_Pid.Sus_2025_PN_Slk.json"
+  ],
+  "row_counts": {
+    "sft": {
+      "train": 2468,
+      "val": 311,
+      "test": 296
+    },
+    "grpo": {
+      "train": 534,
+      "val": 68,
+      "test": 65
+    },
+    "rag": {
+      "train": 529,
+      "val": 68,
+      "test": 68
+    }
+  }
+}
