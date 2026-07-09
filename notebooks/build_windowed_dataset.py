@@ -56,10 +56,13 @@ assert len(CANONICAL_SECTIONS) == 31
 PURPOSES = ("sft", "grpo", "rag")
 SPLITS = ("train", "val", "test")
 
-# Window geometry (characters of line-numbered content). ~22K chars is roughly
-# 6-7K tokens for Indonesian legal text, leaving room for the system prompt
-# and the short JSON target inside a max_seq_length of 8192.
-WINDOW_CHARS = 22_000
+# Window geometry (TOKENS of line-numbered content, measured with the reference
+# tokenizer below). Line-numbered Indonesian legal text runs ~2.2-2.7 chars/token,
+# so windows must be packed by real token counts, not characters. 6,400 content
+# tokens + system prompt (~300) + JSON target (~350) stays under a max_seq_length
+# of 8192 with ~15% margin for the other models' tokenizers (DeepSeek, Gemma).
+REFERENCE_TOKENIZER = "Qwen/Qwen3.5-9B"
+WINDOW_TOKENS = 6_400
 OVERLAP_FRACTION = 0.15
 MIN_OVERLAP_LINES = 2  # guarantees window-clipped pieces of one span overlap
 
@@ -159,22 +162,22 @@ def numbered_line(i: int, line: str) -> str:
     return f"{i:0{LINE_NO_WIDTH}d}|{line}"
 
 
-def window_lines(lines: list[str]) -> list[tuple[int, int]]:
-    """Greedy char-budget packing of whole lines into overlapping windows.
+def window_lines(cost: list[int]) -> list[tuple[int, int]]:
+    """Greedy token-budget packing of whole lines into overlapping windows.
 
+    ``cost[i]`` is the token count of numbered line i (incl. its newline).
     Returns 1-based inclusive (first_line, last_line) per window. Consecutive
-    windows overlap by ~OVERLAP_FRACTION of chars (>= MIN_OVERLAP_LINES lines)
+    windows overlap by ~OVERLAP_FRACTION of tokens (>= MIN_OVERLAP_LINES lines)
     so any span clipped at a boundary yields OVERLAPPING pieces that the
     assembler can merge back into one range.
     """
-    n = len(lines)
-    cost = [len(lines[i]) + LINE_NO_WIDTH + 2 for i in range(n)]  # +"|" +"\n"
+    n = len(cost)
     windows: list[tuple[int, int]] = []
     a = 0  # 0-based first line of current window
     while a < n:
         total = 0
         b = a
-        while b < n and (total + cost[b] <= WINDOW_CHARS or b == a):
+        while b < n and (total + cost[b] <= WINDOW_TOKENS or b == a):
             total += cost[b]
             b += 1
         # window covers lines [a, b-1]
@@ -270,13 +273,21 @@ def assemble_document(
 # Row building
 # --------------------------------------------------------------------------
 
-def build_windows_for_row(row: pd.Series) -> list[dict[str, Any]]:
+def line_token_costs(lines: list[str], tokenizer) -> list[int]:
+    """Token count of each numbered line (+1 for the joining newline)."""
+    numbered = [numbered_line(i, line) for i, line in enumerate(lines, start=1)]
+    encoded = tokenizer(numbered, add_special_tokens=False)["input_ids"]
+    return [len(ids) + 1 for ids in encoded]
+
+
+def build_windows_for_row(row: pd.Series, tokenizer) -> list[dict[str, Any]]:
     input_text: str = row["input_text"]
     sections: dict[str, list[str]] = json.loads(row["sections_json"])
 
     offsets = replay_span_offsets(sections, input_text)
     lines, line_ranges = char_to_line_ranges(offsets, input_text)
-    windows = window_lines(lines)
+    costs = line_token_costs(lines, tokenizer)
+    windows = window_lines(costs)
     n_windows = len(windows)
 
     out_rows: list[dict[str, Any]] = []
@@ -323,6 +334,7 @@ def build_windows_for_row(row: pd.Series) -> list[dict[str, Any]]:
             # statistics
             "n_sections_present": len(present),
             "n_input_chars": len(window_text),
+            "n_window_tokens": sum(costs[wa - 1:wb]),  # reference-tokenizer count
             "n_target_chars": len(target_json),
         })
 
@@ -374,8 +386,10 @@ def write_readme(out_dir: Path, info: dict[str, Any]) -> None:
         "leakage-safe purpose/split assignment, seed 3407).",
         "",
         "Each legacy document row (~34K tokens median — longer than a 32K context)",
-        "is re-expressed as overlapping line-numbered windows of ~22K characters",
-        "(~6-7K tokens). The supervision target per window is a compact JSON of",
+        f"is re-expressed as overlapping line-numbered windows of <= {info['window_tokens']}",
+        f"content tokens (measured with `{info['reference_tokenizer']}`; fits a",
+        "max_seq_length of 8192 with margin for other tokenizers). The supervision",
+        "target per window is a compact JSON of",
         "GLOBAL inclusive line ranges per canonical section:",
         "",
         "```json",
@@ -440,18 +454,24 @@ def main() -> None:
     out_dir = repo_root / args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(REFERENCE_TOKENIZER)
+    sys_tokens = len(tokenizer(SYSTEM_PROMPT, add_special_tokens=False)["input_ids"])
+    print(f"Reference tokenizer {REFERENCE_TOKENIZER}; system prompt = {sys_tokens} tokens; "
+          f"window budget = {WINDOW_TOKENS} content tokens")
+
     row_counts: dict[str, dict[str, int]] = {p: {} for p in PURPOSES}
     doc_counts: dict[str, dict[str, int]] = {p: {} for p in PURPOSES}
     total_rows = 0
     total_docs = 0
-    win_char_max = 0
+    win_tok_max = 0
     for purpose in PURPOSES:
         for split in SPLITS:
             src = legacy_dir / purpose / f"{split}.parquet"
             df = pd.read_parquet(src)
             out_rows: list[dict[str, Any]] = []
             for _, row in df.iterrows():
-                out_rows.extend(build_windows_for_row(row))
+                out_rows.extend(build_windows_for_row(row, tokenizer))
             sub = out_dir / purpose
             sub.mkdir(parents=True, exist_ok=True)
             wdf = pd.DataFrame(out_rows)
@@ -460,15 +480,19 @@ def main() -> None:
             doc_counts[purpose][split] = len(df)
             total_rows += len(wdf)
             total_docs += len(df)
-            win_char_max = max(win_char_max, int(wdf["n_input_chars"].max()))
+            split_tok_max = int(wdf["n_window_tokens"].max())
+            win_tok_max = max(win_tok_max, split_tok_max)
+            n_over = int((wdf["n_window_tokens"] > WINDOW_TOKENS).sum())
             print(f"  {purpose}/{split}: {len(df)} docs -> {len(wdf)} windows "
-                  f"(max window {int(wdf['n_input_chars'].max())} chars)")
+                  f"(max window {split_tok_max} tokens, {n_over} over budget)")
             del df, wdf, out_rows
 
     info = {
         "built_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "source_dataset": "Haeryz/putusan-structured-extraction (legacy parquets)",
-        "window_chars": WINDOW_CHARS,
+        "reference_tokenizer": REFERENCE_TOKENIZER,
+        "window_tokens": WINDOW_TOKENS,
+        "system_prompt_tokens": sys_tokens,
         "overlap_fraction": OVERLAP_FRACTION,
         "min_overlap_lines": MIN_OVERLAP_LINES,
         "line_no_width": LINE_NO_WIDTH,
@@ -478,7 +502,7 @@ def main() -> None:
         "doc_counts": doc_counts,
         "total_rows": total_rows,
         "total_docs": total_docs,
-        "max_window_chars_observed": win_char_max,
+        "max_window_tokens_observed": win_tok_max,
         "round_trip": "PASSED for every document (gold windows -> exact sections)",
     }
     (out_dir / "dataset_info.json").write_text(
