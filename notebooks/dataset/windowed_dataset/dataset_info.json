@@ -1,0 +1,82 @@
+{
+  "built_at": "2026-07-09T13:01:27+00:00",
+  "source_dataset": "Haeryz/putusan-structured-extraction (legacy parquets)",
+  "reference_tokenizer": "Qwen/Qwen3.5-9B",
+  "window_tokens": 6400,
+  "system_prompt_tokens": 265,
+  "overlap_fraction": 0.15,
+  "min_overlap_lines": 2,
+  "line_no_width": 5,
+  "system_prompt": "Anda adalah pengekstrak terstruktur putusan pengadilan Indonesia. Anda menerima SATU POTONGAN (window) dari teks putusan; setiap baris diawali nomor baris global berformat 'NNNNN|'. Keluarkan SATU objek JSON dengan tepat dua kunci: 'sections' dan 'sections_absent'. Di 'sections', untuk setiap bagian kanonik yang muncul dalam potongan ini, berikan daftar rentang baris inklusif [[awal, akhir], ...] memakai nomor baris global persis seperti yang tercetak — jangan menyalin teks putusan, jangan menghitung, cukup salin nomor baris yang terlihat. Semua bagian kanonik lain dicantumkan sebagai daftar nama di 'sections_absent'. Kunci bagian, dalam urutan kanonik: judul, nomor_putusan, irah_irah, nama_pengadilan_negeri, keterangan_perkara, nama_lengkap, tempat_lahir, umur_tanggal_lahir, jenis_kelamin, kebangsaan, tempat_tinggal, agama, pekerjaan, penangkapan, penahanan, tuntutan, dakwaan, saksi, ahli, terdakwa, surat, petunjuk_barang_bukti, fakta_hukum, pertimbangan_hukum, amar_putusan, hari, tanggal, tahun, siapa_yang_memutus, panitera_pengganti, tanda_tangan_majelis.",
+  "canonical_sections": [
+    "judul",
+    "nomor_putusan",
+    "irah_irah",
+    "nama_pengadilan_negeri",
+    "keterangan_perkara",
+    "nama_lengkap",
+    "tempat_lahir",
+    "umur_tanggal_lahir",
+    "jenis_kelamin",
+    "kebangsaan",
+    "tempat_tinggal",
+    "agama",
+    "pekerjaan",
+    "penangkapan",
+    "penahanan",
+    "tuntutan",
+    "dakwaan",
+    "saksi",
+    "ahli",
+    "terdakwa",
+    "surat",
+    "petunjuk_barang_bukti",
+    "fakta_hukum",
+    "pertimbangan_hukum",
+    "amar_putusan",
+    "hari",
+    "tanggal",
+    "tahun",
+    "siapa_yang_memutus",
+    "panitera_pengganti",
+    "tanda_tangan_majelis"
+  ],
+  "row_counts": {
+    "sft": {
+      "train": 13657,
+      "val": 1606,
+      "test": 1661
+    },
+    "grpo": {
+      "train": 3061,
+      "val": 376,
+      "test": 334
+    },
+    "rag": {
+      "train": 2848,
+      "val": 319,
+      "test": 340
+    }
+  },
+  "doc_counts": {
+    "sft": {
+      "train": 2468,
+      "val": 311,
+      "test": 296
+    },
+    "grpo": {
+      "train": 534,
+      "val": 68,
+      "test": 65
+    },
+    "rag": {
+      "train": 529,
+      "val": 68,
+      "test": 68
+    }
+  },
+  "total_rows": 24202,
+  "total_docs": 4407,
+  "max_window_tokens_observed": 6400,
+  "round_trip": "PASSED for every document (gold windows -> exact sections)"
+}

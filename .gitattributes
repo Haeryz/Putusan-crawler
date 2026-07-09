@@ -1,3 +1,4 @@
 # Shell launchers must keep LF endings so bash on macOS/Linux can run them
 # even when the repo is cloned/edited on Windows (autocrlf).
 *.sh text eol=lf
+notebooks/dataset/**/*.parquet filter=lfs diff=lfs merge=lfs -text
