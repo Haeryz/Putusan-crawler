@@ -446,3 +446,63 @@ empty_sections
 ```
 
 No downstream consumer receives a schema change.
+
+---
+
+## 9. What the Trained Model Is
+
+The trained system is **not a generative LLM**. Qwen3.5-9B is used as a frozen
+4-bit reading encoder; its vocabulary head is never called, and the notebook never
+invokes `model.generate()`. There is no prompt, no chat template, no sampling, and
+no decoding temperature anywhere in training or inference.
+
+### Components of the built model
+
+| component | role | trained? | approximate size |
+|---|---|---|---:|
+| Qwen3.5-9B backbone (4-bit NF4) | reads text, produces hidden states | frozen | 9B parameters |
+| QLoRA adapter (`r=32`) | adapts the reader to legal text | yes | ~100–200 MB |
+| unit pooler (attention pool + 4096→512 projection) | one vector per source line | yes | small |
+| two-layer bidirectional GRU (256/direction) | whole-document context | yes | ~5M parameters |
+| boundary filter MLP | scores each gap between lines | yes | small |
+| filtered semi-CRF (span scorer, label embedding, transitions) | picks the global best segmentation | yes | small |
+| auxiliary heads (fine/coarse unit classifiers, presence head) | training signal only | yes | small |
+
+### Forward pass
+
+```text
+document text
+  -> Qwen encoder (per 4,096-token chunk): one 512-dim vector per source line
+  -> bidirectional GRU over all line vectors of the document
+  -> boundary filter: which gaps between lines may be section boundaries
+  -> semi-CRF + Viterbi: best (span, label) segmentation under the canonical order
+  -> deterministic serializer: slice the source text at the chosen offsets
+```
+
+The neural network's output is numbers — boundary scores, span-label potentials,
+and segment posteriors — never words. The only text in the final JSON is verbatim
+substrings copied from the input by ordinary Python slicing.
+
+### Two output layers
+
+1. **Internal records** (Section 8): `(section_key, start_char, end_char,
+   confidence)` per predicted span. The confidence is the exact marginal
+   probability of that segment under the globally normalized semi-CRF.
+2. **Public JSON**: the existing 31-key contract. All 31 keys are always present;
+   skipped sections are `[]` and listed in `empty_sections`; repeated labels become
+   list items (for example, multiple `saksi` entries).
+
+### Deployment implications
+
+- The model answers exactly one question — "where are the 31 canonical sections in
+  this document" — and cannot chat, summarize, or answer free-form queries.
+- The durable artifact (W&B checkpoint) is the QLoRA adapter plus the structured
+  head weights. It is not a standalone Hugging Face generation model and only runs
+  inside this notebook's stack: base Qwen + adapter + heads + Viterbi + serializer.
+- The output is guaranteed valid JSON with guaranteed verbatim legal text: the
+  model makes ~31 structured decisions per document instead of being correct at
+  every one of tens of thousands of generated tokens, so inference takes seconds
+  per judgment rather than minutes, and hallucinated text is structurally
+  impossible.
+- This is the same architectural relationship BERT-based extractors have to BERT —
+  an encoder with task heads — with a 9B QLoRA-adapted Qwen as the encoder.
