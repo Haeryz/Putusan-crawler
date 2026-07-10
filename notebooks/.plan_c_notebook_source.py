@@ -616,9 +616,77 @@ def audit_transitions(documents: list[DocumentExample]) -> dict[str, int]:
     return {"transitions": transitions, "blank_line_separated": blank_line}
 
 
+PREPARATION_FINGERPRINT = hashlib.sha256(json.dumps({
+    "model_name": CFG.model_name,
+    "model_revision": CFG.model_revision,
+    "max_unit_tokens": CFG.max_unit_tokens,
+    "max_chunk_tokens": CFG.max_chunk_tokens,
+    "canonical_sections": CANONICAL_SECTIONS,
+}, sort_keys=True).encode()).hexdigest()
+PREPARED_ARTIFACT_NAME = f"plan-c-prepared-{PREPARATION_FINGERPRINT[:16]}"
+PREPARED_ROOT = Path(CFG.cache_root) / "prepared" / PREPARATION_FINGERPRINT[:16]
+NEWLY_PREPARED_SPLITS: set[str] = set()
+
+
+def prepared_bundle_path(split: str) -> Path:
+    return PREPARED_ROOT / f"{split}.pt"
+
+
+def restore_prepared_documents_artifact() -> None:
+    if all(prepared_bundle_path(split).exists() for split in RAW_SPLITS):
+        return
+    try:
+        artifact = RUN.use_artifact(
+            f"{PREPARED_ARTIFACT_NAME}:latest", type="prepared-documents"
+        )
+    except (wandb.errors.CommError, ValueError):
+        print("No prepared-documents Artifact yet; tokenizing this one time.")
+        return
+    root = Path(artifact.download())
+    PREPARED_ROOT.mkdir(parents=True, exist_ok=True)
+    for path in root.glob("*.pt"):
+        shutil.copy2(path, PREPARED_ROOT / path.name)
+
+
+def log_prepared_documents_artifact() -> None:
+    artifact = wandb.Artifact(
+        PREPARED_ARTIFACT_NAME,
+        type="prepared-documents",
+        metadata={"preparation_fingerprint": PREPARATION_FINGERPRINT},
+    )
+    artifact.add_dir(str(PREPARED_ROOT))
+    RUN.log_artifact(artifact, aliases=["latest"]).wait()
+
+
+def load_or_prepare_split(split: str) -> tuple[list[DocumentExample], dict[str, int]]:
+    path = prepared_bundle_path(split)
+    if path.exists():
+        bundle = torch.load(path, weights_only=False)
+        if (
+            bundle["preparation_fingerprint"] == PREPARATION_FINGERPRINT
+            and bundle["raw_fingerprint"] == RAW_SPLITS[split]._fingerprint
+        ):
+            print(f"Loaded prepared {split} split from Artifact cache; skipped tokenization.")
+            return bundle["documents"], bundle["audit"]
+    documents, audit = prepare_split(split)
+    PREPARED_ROOT.mkdir(parents=True, exist_ok=True)
+    torch.save({
+        "preparation_fingerprint": PREPARATION_FINGERPRINT,
+        "raw_fingerprint": RAW_SPLITS[split]._fingerprint,
+        "documents": documents,
+        "audit": audit,
+    }, path)
+    NEWLY_PREPARED_SPLITS.add(split)
+    return documents, audit
+
+
+restore_prepared_documents_artifact()
 PREPARED_SPLITS = {
-    split: prepare_split(split) for split in ("train", "validation")
+    split: load_or_prepare_split(split) for split in ("train", "validation")
 }
+if NEWLY_PREPARED_SPLITS:
+    log_prepared_documents_artifact()
+    NEWLY_PREPARED_SPLITS.clear()
 DOCS = {split: prepared[0] for split, prepared in PREPARED_SPLITS.items()}
 
 
@@ -660,7 +728,11 @@ def load_test_split_once() -> None:
     RAW_SPLITS["test"] = load_dataset(
         CFG.dataset_name, CFG.dataset_config, split="test"
     )
-    PREPARED_SPLITS["test"] = prepare_split("test")
+    restore_prepared_documents_artifact()
+    PREPARED_SPLITS["test"] = load_or_prepare_split("test")
+    if NEWLY_PREPARED_SPLITS:
+        log_prepared_documents_artifact()
+        NEWLY_PREPARED_SPLITS.clear()
     DOCS["test"] = PREPARED_SPLITS["test"][0]
     AUDIT["test"] = build_split_audit("test", DOCS["test"])
     test_overlap = train_shas & {
