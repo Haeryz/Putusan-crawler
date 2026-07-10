@@ -68,6 +68,7 @@ from typing import Any, Iterable, Iterator, Sequence
 
 import numpy as np
 import torch
+from tqdm.auto import tqdm
 import torch.nn as nn
 import torch.nn.functional as F
 import wandb
@@ -584,7 +585,7 @@ def prepare_split(split: str) -> tuple[list[DocumentExample], dict[str, int]]:
     source_counts: Counter[str] = Counter(str(sha) for sha in rows["source_sha256"])
     documents: list[DocumentExample] = []
     failures: list[str] = []
-    for row in rows:
+    for row in tqdm(rows, desc=f"Preparing {split}", unit="doc"):
         try:
             documents.append(prepare_document(row, TOKENIZER, source_counts))
         except (ValueError, AssertionError, TypeError) as error:
