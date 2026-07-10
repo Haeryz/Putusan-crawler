@@ -13,10 +13,7 @@
 # not extraction from unfiltered raw judgments. RAG, GRPO, line-number targets, and
 # windowed_dataset are intentionally absent.
 #
-# SMOKE_TEST is the single dry-run switch in the configuration cell below. It
-# defaults to False (full A100 training). Set it to True only to sanity-check the
-# pipeline on a tiny subset / non-A100 GPU. Keep the W&B run ID printed by the
-# setup cell to resume after a Colab reset.
+# Keep the W&B run ID printed by the setup cell to resume after a Colab reset.
 
 # %%
 # Colab dependencies. Restart the runtime if Colab reports that an imported package
@@ -102,9 +99,6 @@ class TrainConfig:
     dataset_name: str = "Haeryz/putusan-structured-extraction"
     dataset_config: str = "sft"
     seed: int = 3407
-    smoke_test: bool = False
-    smoke_train_rows: int = 8
-    smoke_val_rows: int = 4
     max_unit_tokens: int = 512
     max_chunk_tokens: int = 4096
     hidden_size: int = 4096
@@ -142,27 +136,17 @@ class TrainConfig:
     run_final_test: bool = False
 
 
-SMOKE_TEST = False  # the ONLY smoke switch: True = tiny dry run (8 docs, any GPU)
-
 CFG = TrainConfig(
-    smoke_test=SMOKE_TEST,
     resume_run_id=None,
 )
-if CFG.smoke_test:  # every smoke shortening lives here, nowhere else
-    CFG = dataclasses.replace(
-        CFG, stage1_coarse_epochs=1, stage1_fine_epochs=1,
-        stage2_max_epochs=2, stage3_max_epochs=1,
-    )
 
 assert torch.cuda.is_available(), "Select a GPU runtime in Google Colab."
 GPU_NAME = torch.cuda.get_device_name(0)
 GPU_GB = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
 print(f"GPU: {GPU_NAME} ({GPU_GB:.2f} GiB)")
-if not CFG.smoke_test:
-    assert "A100" in GPU_NAME and GPU_GB >= 39.0, (
-        "Full Plan C training requires the Colab A100 40GB runtime. "
-        "Use smoke_test=True on other GPUs."
-    )
+if "A100" not in GPU_NAME or GPU_GB < 39.0:
+    print("WARNING: Plan C is sized for the Colab A100 40GB runtime; "
+          "training on this GPU may be slow or run out of memory.")
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["WANDB_PROJECT"] = CFG.wandb_project
@@ -514,13 +498,6 @@ DATASET_FINGERPRINT = hashlib.sha256(
     "|".join(RAW_SPLITS[s]._fingerprint for s in ("train", "validation", "test")).encode()
 ).hexdigest()
 print({split: len(ds) for split, ds in RAW_SPLITS.items()}, DATASET_FINGERPRINT[:16])
-
-if CFG.smoke_test:
-    RAW_SPLITS = {
-        "train": RAW_SPLITS["train"].select(range(CFG.smoke_train_rows)),
-        "validation": RAW_SPLITS["validation"].select(range(CFG.smoke_val_rows)),
-        "test": RAW_SPLITS["test"].select(range(CFG.smoke_val_rows)),
-    }
 
 
 def prepare_split(split: str) -> list[DocumentExample]:
