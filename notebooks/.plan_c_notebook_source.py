@@ -13,8 +13,10 @@
 # not extraction from unfiltered raw judgments. RAG, GRPO, line-number targets, and
 # windowed_dataset are intentionally absent.
 #
-# Start with SMOKE_TEST=True. For a full A100 run, set it to False, enable the
-# required stage flags, and keep the W&B run ID printed by the setup cell.
+# SMOKE_TEST is the single dry-run switch in the configuration cell below. It
+# defaults to False (full A100 training). Set it to True only to sanity-check the
+# pipeline on a tiny subset / non-A100 GPU. Keep the W&B run ID printed by the
+# setup cell to resume after a Colab reset.
 
 # %%
 # Colab dependencies. Restart the runtime if Colab reports that an imported package
@@ -100,7 +102,7 @@ class TrainConfig:
     dataset_name: str = "Haeryz/putusan-structured-extraction"
     dataset_config: str = "sft"
     seed: int = 3407
-    smoke_test: bool = True
+    smoke_test: bool = False
     smoke_train_rows: int = 8
     smoke_val_rows: int = 4
     max_unit_tokens: int = 512
@@ -140,10 +142,17 @@ class TrainConfig:
     run_final_test: bool = False
 
 
+SMOKE_TEST = False  # the ONLY smoke switch: True = tiny dry run (8 docs, any GPU)
+
 CFG = TrainConfig(
-    smoke_test=True,
+    smoke_test=SMOKE_TEST,
     resume_run_id=None,
 )
+if CFG.smoke_test:  # every smoke shortening lives here, nowhere else
+    CFG = dataclasses.replace(
+        CFG, stage1_coarse_epochs=1, stage1_fine_epochs=1,
+        stage2_max_epochs=2, stage3_max_epochs=1,
+    )
 
 assert torch.cuda.is_available(), "Select a GPU runtime in Google Colab."
 GPU_NAME = torch.cuda.get_device_name(0)
@@ -1375,7 +1384,7 @@ def run_stage_2() -> None:
     log_embedding_cache_artifact()
     documents = DOCS["train"]
     steps_per_epoch = math.ceil(len(documents) / CFG.gradient_accumulation_docs)
-    max_epochs = 2 if CFG.smoke_test else CFG.stage2_max_epochs
+    max_epochs = CFG.stage2_max_epochs
     optimizer, scheduler = build_optimizer(
         lora=False, heads=True, total_steps=max_epochs * steps_per_epoch
     )
@@ -1532,7 +1541,7 @@ gradient_cache_equivalence_test()
 def run_stage_3() -> None:
     documents = DOCS["train"]
     steps_per_epoch = math.ceil(len(documents) / CFG.gradient_accumulation_docs)
-    max_epochs = 1 if CFG.smoke_test else CFG.stage3_max_epochs
+    max_epochs = CFG.stage3_max_epochs
     optimizer, scheduler = build_optimizer(
         lora=True, heads=True, total_steps=max_epochs * steps_per_epoch
     )
