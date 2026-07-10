@@ -121,15 +121,32 @@ class TrainConfig:
     stage2_patience: int = 5
     stage3_max_epochs: int = 5
     stage3_patience: int = 1
-    # "C" full Plan C; "A2" frozen Qwen + independent classifier; "A3" local QLoRA
-    # without global context; "A4" linear-chain CRF; "A5" unfiltered semi-CRF.
+    # The editable experiment matrix lives here, beside every training hyperparameter.
+    # A0/A1 are deterministic baselines and therefore do not need optimizer runs.
     ablation: str = "C"
+    component_ablation: str = "none"
+    reporting_seeds: tuple[int, ...] = (3407, 3408, 3409)
+    systems: tuple[str, ...] = ("A2", "A3", "A4", "A5", "C")
+    component_ablations: tuple[str, ...] = (
+        "no_global_encoder",
+        "no_boundary_filter",
+        "no_semicrf",
+        "no_coarse_curriculum",
+        "no_presence_loss",
+        "no_monotonic_mask",
+        "no_stage3",
+    )
+    run_required_matrix: bool = True
     checkpoint_steps: int = 100
     cache_root: str = "/content/plan_c_cache"
     checkpoint_root: str = "/content/plan_c_checkpoint"
     wandb_project: str = "sinergi-plan-c"
     wandb_entity: str | None = None
     resume_run_id: str | None = None
+    resume_experiment_id: str | None = None
+    wandb_watch: bool = True
+    wandb_watch_log_freq: int = 100
+    smoke_test: bool = False
     run_stage_1: bool = True
     run_stage_2: bool = True
     run_stage_3: bool = True
@@ -138,19 +155,21 @@ class TrainConfig:
 
 CFG = TrainConfig(
     resume_run_id=None,
+    resume_experiment_id=None,
 )
 
 assert torch.cuda.is_available(), "Select a GPU runtime in Google Colab."
 GPU_NAME = torch.cuda.get_device_name(0)
 GPU_GB = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
 print(f"GPU: {GPU_NAME} ({GPU_GB:.2f} GiB)")
-if "A100" not in GPU_NAME or GPU_GB < 39.0:
-    print("WARNING: Plan C is sized for the Colab A100 40GB runtime; "
-          "training on this GPU may be slow or run out of memory.")
+if ("A100" not in GPU_NAME or GPU_GB < 39.0) and not CFG.smoke_test:
+    raise RuntimeError(
+        "Plan C full training requires an A100 40GB runtime. "
+        "Set smoke_test=True only for a deliberately reduced diagnostic run."
+    )
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["WANDB_PROJECT"] = CFG.wandb_project
-os.environ["WANDB_WATCH"] = "false"
 
 # %%
 def start_wandb_run(cfg: TrainConfig) -> wandb.sdk.wandb_run.Run:
@@ -175,6 +194,9 @@ def start_wandb_run(cfg: TrainConfig) -> wandb.sdk.wandb_run.Run:
 
 
 RUN = start_wandb_run(CFG)
+wandb.define_metric("global_step")
+for metric_namespace in ("train", "stage1", "stage2", "stage3", "validation"):
+    wandb.define_metric(f"{metric_namespace}/*", step_metric="global_step")
 
 # %% [markdown]
 # ## Canonical schema and exact span supervision
@@ -225,10 +247,12 @@ class GoldSpan:
 class Unit:
     start_char: int
     end_char: int
-    label: int
-    item_index: int
     token_count: int
     forced_split: bool = False
+    # Supervision is attached only after label-free text unitization. Inference
+    # leaves these sentinels untouched and never needs sections_json.
+    label: int = -100
+    item_index: int = -1
 
 
 @dataclass
@@ -253,9 +277,13 @@ class DocumentExample:
     units: list[Unit]
     chunks: list[Chunk]
     source_weight: float
+    gold_roundtrip_ok: bool = False
+    label_truncations: int = 0
 
     @property
     def unit_labels(self) -> torch.Tensor:
+        if any(unit.label < 0 for unit in self.units):
+            raise RuntimeError("Gold labels requested for a label-free inference document")
         return torch.tensor([unit.label for unit in self.units], dtype=torch.long)
 
     @property
@@ -323,22 +351,17 @@ def align_gold_spans(text: str, sections_value: str | dict[str, Any]) -> list[Go
     return spans
 
 
-def split_interval_into_units(
+def unitize_text(
     text: str,
-    span: GoldSpan,
     tokenizer: Any,
     max_tokens: int,
 ) -> list[Unit]:
+    """Create semantic units using text alone; gold spans never influence boundaries."""
     units: list[Unit] = []
-    segment = text[span.start_char:span.end_char]
-    line_matches = list(re.finditer(r"[^\n]+", segment))
-    if not line_matches:
-        line_matches = [re.match(r"[\s\S]+", segment)]
+    line_matches = list(re.finditer(r"[^\n]+", text))
     for match in line_matches:
-        if match is None:
-            continue
-        line_start = span.start_char + match.start()
-        line_end = span.start_char + match.end()
+        line_start = match.start()
+        line_end = match.end()
         line = text[line_start:line_end]
         encoded = tokenizer(
             line,
@@ -355,14 +378,41 @@ def split_interval_into_units(
             units.append(Unit(
                 start_char=char_start,
                 end_char=char_end,
-                label=span.label,
-                item_index=span.item_index,
                 token_count=token_end - token_start,
                 forced_split=len(offsets) > max_tokens,
             ))
     if not units:
-        raise ValueError(f"Gold span {span} produced no tokenized unit")
+        raise ValueError("Document produced no tokenized non-empty units")
     return units
+
+
+def attach_gold_supervision(
+    units: Sequence[Unit],
+    spans: Sequence[GoldSpan],
+) -> tuple[list[Unit], int]:
+    """Attach labels after unitization and prove that no unit or gold item was lost."""
+    supervised: list[Unit] = []
+    span_index = 0
+    covered_items: set[tuple[int, int]] = set()
+    for unit in units:
+        while span_index < len(spans) and spans[span_index].end_char <= unit.start_char:
+            span_index += 1
+        if span_index >= len(spans):
+            raise ValueError(f"Unit {unit.start_char}:{unit.end_char} is outside gold spans")
+        span = spans[span_index]
+        if unit.start_char < span.start_char or unit.end_char > span.end_char:
+            raise ValueError(
+                "Label-free unit crosses a gold boundary: "
+                f"unit={unit.start_char}:{unit.end_char}, "
+                f"gold={span.start_char}:{span.end_char}"
+            )
+        supervised.append(dataclasses.replace(
+            unit, label=span.label, item_index=span.item_index
+        ))
+        covered_items.add((span.label, span.item_index))
+    expected_items = {(span.label, span.item_index) for span in spans}
+    label_truncations = len(expected_items - covered_items)
+    return supervised, label_truncations
 
 
 def tokenize_chunk(
@@ -438,6 +488,31 @@ def pack_chunks(
     return chunks
 
 
+def prepare_inference_document(
+    text: str,
+    tokenizer: Any,
+    *,
+    row_id: str = "inference",
+    source_file: str = "",
+    source_sha256: str = "",
+    corpus: str = "",
+) -> DocumentExample:
+    """Production preprocessing path: raw text in, units/chunks out, no labels required."""
+    units = unitize_text(text, tokenizer, CFG.max_unit_tokens)
+    return DocumentExample(
+        row_id=row_id,
+        source_file=source_file,
+        source_sha256=source_sha256 or hashlib.sha256(text.encode()).hexdigest(),
+        corpus=corpus,
+        annotator_model="",
+        text=text,
+        gold_spans=[],
+        units=units,
+        chunks=pack_chunks(text, units, tokenizer, CFG.max_chunk_tokens),
+        source_weight=1.0,
+    )
+
+
 def prepare_document(
     row: dict[str, Any],
     tokenizer: Any,
@@ -445,13 +520,10 @@ def prepare_document(
 ) -> DocumentExample:
     text = row["input_text"]
     spans = align_gold_spans(text, row["sections_json"])
-    units = [
-        unit
-        for span in spans
-        for unit in split_interval_into_units(
-            text, span, tokenizer, CFG.max_unit_tokens
-        )
-    ]
+    # Crucial anti-leakage invariant: unit boundaries are fixed from input_text
+    # before sections_json is inspected for supervision.
+    unlabeled_units = unitize_text(text, tokenizer, CFG.max_unit_tokens)
+    units, label_truncations = attach_gold_supervision(unlabeled_units, spans)
     chunks = pack_chunks(text, units, tokenizer, CFG.max_chunk_tokens)
     sha = str(row["source_sha256"])
     document = DocumentExample(
@@ -465,6 +537,7 @@ def prepare_document(
         units=units,
         chunks=chunks,
         source_weight=1.0 / source_counts[sha],
+        label_truncations=label_truncations,
     )
     reconstructed = [
         document.text[span.start_char:span.end_char] for span in document.gold_spans
@@ -474,8 +547,14 @@ def prepare_document(
         for key in CANONICAL_SECTIONS
         for item in parse_sections(row["sections_json"])[key]
     ]
-    if reconstructed != expected:
+    roundtrip_ok = reconstructed == expected
+    if not roundtrip_ok:
         raise AssertionError("Gold offsets failed verbatim round-trip")
+    if document.label_truncations:
+        raise AssertionError(
+            f"{document.label_truncations} gold items received no semantic unit"
+        )
+    document.gold_roundtrip_ok = roundtrip_ok
     return document
 # %% [markdown]
 # ## Dataset loading, source-balanced weights, and preprocessing audit
@@ -492,15 +571,15 @@ assert TOKENIZER.is_fast, "Plan C needs a fast tokenizer for character offset ma
 
 RAW_SPLITS = {
     split: load_dataset(CFG.dataset_name, CFG.dataset_config, split=split)
-    for split in ("train", "validation", "test")
+    for split in ("train", "validation")
 }
 DATASET_FINGERPRINT = hashlib.sha256(
-    "|".join(RAW_SPLITS[s]._fingerprint for s in ("train", "validation", "test")).encode()
+    "|".join(RAW_SPLITS[s]._fingerprint for s in ("train", "validation")).encode()
 ).hexdigest()
 print({split: len(ds) for split, ds in RAW_SPLITS.items()}, DATASET_FINGERPRINT[:16])
 
 
-def prepare_split(split: str) -> list[DocumentExample]:
+def prepare_split(split: str) -> tuple[list[DocumentExample], dict[str, int]]:
     rows = RAW_SPLITS[split]
     source_counts: Counter[str] = Counter(str(sha) for sha in rows["source_sha256"])
     documents: list[DocumentExample] = []
@@ -516,7 +595,13 @@ def prepare_split(split: str) -> list[DocumentExample]:
         raise RuntimeError(
             f"{split}: {len(failures)} rows failed exact alignment; Plan C requires zero."
         )
-    return documents
+    return documents, {
+        "raw_rows": len(rows),
+        "aligned_rows": len(documents),
+        "alignment_failures": len(failures),
+        "roundtrip_rows": sum(document.gold_roundtrip_ok for document in documents),
+        "label_truncations": sum(document.label_truncations for document in documents),
+    }
 
 
 def audit_transitions(documents: list[DocumentExample]) -> dict[str, int]:
@@ -530,15 +615,31 @@ def audit_transitions(documents: list[DocumentExample]) -> dict[str, int]:
     return {"transitions": transitions, "blank_line_separated": blank_line}
 
 
-DOCS = {split: prepare_split(split) for split in ("train", "validation", "test")}
-AUDIT = {
-    split: {
+PREPARED_SPLITS = {
+    split: prepare_split(split) for split in ("train", "validation")
+}
+DOCS = {split: prepared[0] for split, prepared in PREPARED_SPLITS.items()}
+
+
+def build_split_audit(
+    split: str,
+    documents: list[DocumentExample],
+) -> dict[str, int]:
+    return {
+        **PREPARED_SPLITS[split][1],
         "rows": len(documents),
         "units": sum(len(d.units) for d in documents),
         "chunks": sum(len(d.chunks) for d in documents),
+        "forced_unit_splits": sum(
+            unit.forced_split for document in documents for unit in document.units
+        ),
         "unique_sources": len({d.source_sha256 for d in documents}),
         **audit_transitions(documents),
     }
+
+
+AUDIT = {
+    split: build_split_audit(split, documents)
     for split, documents in DOCS.items()
 }
 for split, stats in AUDIT.items():
@@ -547,9 +648,29 @@ RUN.log({f"data/{split}/{key}": value for split, stats in AUDIT.items() for key,
 RUN.summary["data/fingerprint"] = DATASET_FINGERPRINT
 
 train_shas = {d.source_sha256 for d in DOCS["train"]}
-for split in ("validation", "test"):
-    overlap = train_shas & {d.source_sha256 for d in DOCS[split]}
-    assert not overlap, f"source_sha256 leakage between train and {split}: {sorted(overlap)[:3]}"
+overlap = train_shas & {d.source_sha256 for d in DOCS["validation"]}
+assert not overlap, f"source_sha256 leakage into validation: {sorted(overlap)[:3]}"
+
+
+def load_test_split_once() -> None:
+    """Load, align, and audit test only after the validation configuration is frozen."""
+    if "test" in DOCS:
+        return
+    RAW_SPLITS["test"] = load_dataset(
+        CFG.dataset_name, CFG.dataset_config, split="test"
+    )
+    PREPARED_SPLITS["test"] = prepare_split("test")
+    DOCS["test"] = PREPARED_SPLITS["test"][0]
+    AUDIT["test"] = build_split_audit("test", DOCS["test"])
+    test_overlap = train_shas & {
+        document.source_sha256 for document in DOCS["test"]
+    }
+    assert not test_overlap, f"source_sha256 leakage into test: {sorted(test_overlap)[:3]}"
+    RUN.log({
+        **{f"data/test/{key}": value for key, value in AUDIT["test"].items()},
+        "global_step": TRAIN_STATE["global_step"],
+    })
+    RUN.summary["data/test_fingerprint"] = RAW_SPLITS["test"]._fingerprint
 
 
 def gold_gap_labels(document: DocumentExample) -> tuple[torch.Tensor, torch.Tensor]:
@@ -769,14 +890,21 @@ class StructuredHeads(nn.Module):
             torch.tril(torch.full((n_labels, n_labels), float("-inf")), diagonal=-1),
         )
 
-    def masked_transitions(self) -> torch.Tensor:
+    def masked_transitions(self, monotonic: bool = True) -> torch.Tensor:
         """Backward label transitions are forbidden; same or later labels are allowed."""
-        return self.transition + self.transition_mask
+        return self.transition + self.transition_mask if monotonic else self.transition
 
 
 UNIT_POOLER = UnitPooler(CFG.hidden_size, CFG.unit_dim).to(DEVICE)
 HEADS = StructuredHeads(CFG).to(DEVICE)
 print(sum(p.numel() for p in HEADS.parameters()), "structured-head parameters")
+if CFG.wandb_watch:
+    wandb.watch(
+        [MODEL, UNIT_POOLER, HEADS],
+        log="all",
+        log_freq=CFG.wandb_watch_log_freq,
+        log_graph=True,
+    )
 
 
 def encode_chunk(chunk: Chunk, with_grad: bool) -> torch.Tensor:
@@ -1038,8 +1166,25 @@ FINE_TO_COARSE_DEV = FINE_TO_COARSE.to(DEVICE)
 CALIBRATION = {"threshold": CFG.boundary_threshold, "cap": CFG.candidate_cap}
 TRAIN_STATE = {
     "stage": 1, "epoch": 0, "doc_cursor": 0, "accum_cursor": 0, "global_step": 0,
-    "best_val_span_f1": -1.0,
+    "best_stage1_macro_f1": -1.0, "best_val_span_f1": -1.0,
 }
+ACTIVE_EXPERIMENT_ID = "single"
+
+
+def safe_experiment_id(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_.-]+", "-", value).strip("-")
+
+
+def checkpoint_artifact_name() -> str:
+    return f"plan-c-checkpoint-{RUN.id}-{safe_experiment_id(ACTIVE_EXPERIMENT_ID)}"
+
+
+def active_checkpoint_root() -> Path:
+    return Path(CFG.checkpoint_root) / safe_experiment_id(ACTIVE_EXPERIMENT_ID)
+
+
+def active_cache_root() -> Path:
+    return Path(CFG.cache_root) / safe_experiment_id(ACTIVE_EXPERIMENT_ID)
 
 
 def document_targets(document: DocumentExample) -> dict[str, torch.Tensor]:
@@ -1064,9 +1209,9 @@ def structured_document_loss(
     """Full Plan C objective on one document's ordered unit embeddings (training mode:
     gold boundaries are always force-included in the candidate set)."""
     targets = document_targets(document)
-    context = (
-        embeddings if ablation in ("A2", "A3") else HEADS.document_encoder(embeddings)
-    )
+    independent = ablation in ("A2", "A3") or CFG.component_ablation == "no_semicrf"
+    no_global = independent or CFG.component_ablation == "no_global_encoder"
+    context = embeddings if no_global else HEADS.document_encoder(embeddings)
     parts: dict[str, torch.Tensor] = {}
     parts["fine"] = F.cross_entropy(HEADS.fine_classifier(context), targets["fine"])
     parts["coarse"] = F.cross_entropy(HEADS.coarse_classifier(context), targets["coarse"])
@@ -1079,7 +1224,7 @@ def structured_document_loss(
     else:
         gap_logits = torch.zeros(0, device=DEVICE)
         parts["boundary"] = embeddings.new_zeros(())
-    if ablation in ("A2", "A3"):
+    if independent:
         parts["semicrf"] = embeddings.new_zeros(())  # independent classifier ablations
     else:
         boundaries = select_boundaries(
@@ -1088,7 +1233,10 @@ def structured_document_loss(
             CALIBRATION["threshold"],
             CALIBRATION["cap"],
             gold_gaps=targets["boundary"],
-            keep_all=ablation in ("A4", "A5"),
+            keep_all=(
+                ablation in ("A4", "A5")
+                or CFG.component_ablation == "no_boundary_filter"
+            ),
         )
         graph = SemiCrfGraph.build(
             context, boundaries, HEADS.span_scorer, adjacent_only=ablation == "A4"
@@ -1098,9 +1246,15 @@ def structured_document_loss(
             if ablation == "A4"
             else document.gold_segments
         )
-        parts["semicrf"] = semicrf_nll(graph, HEADS.masked_transitions(), gold) / len(gold)
-    total = sum(LOSS_WEIGHTS[name] * value for name, value in parts.items())
-    return total, {name: float(value) for name, value in parts.items()}
+        transitions = HEADS.masked_transitions(
+            monotonic=CFG.component_ablation != "no_monotonic_mask"
+        )
+        parts["semicrf"] = semicrf_nll(graph, transitions, gold) / len(gold)
+    weights = dict(LOSS_WEIGHTS)
+    if CFG.component_ablation == "no_presence_loss":
+        weights["presence"] = 0.0
+    total = sum(weights[name] * value for name, value in parts.items())
+    return total, {name: float(value.detach()) for name, value in parts.items()}
 
 
 def trainable_lora_parameters() -> list[torch.nn.Parameter]:
@@ -1108,12 +1262,13 @@ def trainable_lora_parameters() -> list[torch.nn.Parameter]:
 
 
 def build_optimizer(
-    lora: bool, heads: bool, total_steps: int
+    lora: bool, pooler: bool, heads: bool, total_steps: int
 ) -> tuple[Optimizer, Any]:
     groups = []
     if lora:
-        groups.append({"params": trainable_lora_parameters() + list(UNIT_POOLER.parameters()),
-                       "lr": CFG.lora_lr})
+        groups.append({"params": trainable_lora_parameters(), "lr": CFG.lora_lr})
+    if pooler:
+        groups.append({"params": list(UNIT_POOLER.parameters()), "lr": CFG.lora_lr})
     if heads:
         groups.append({"params": list(HEADS.parameters()), "lr": CFG.head_lr})
     try:
@@ -1128,17 +1283,13 @@ def build_optimizer(
     return optimizer, scheduler
 
 
-# %%
-CHECKPOINT_ARTIFACT = f"plan-c-checkpoint-{RUN.id}"
-
-
 def save_checkpoint(
     optimizer: Optimizer | None,
     scheduler: Any,
     best: bool = False,
     reason: str = "step",
 ) -> None:
-    root = Path(CFG.checkpoint_root)
+    root = active_checkpoint_root()
     if root.exists():
         shutil.rmtree(root)
     root.mkdir(parents=True)
@@ -1164,11 +1315,12 @@ def save_checkpoint(
             "dataset_fingerprint": DATASET_FINGERPRINT,
             "model_commit": MODEL_COMMIT,
             "wandb_run_id": RUN.id,
+            "experiment_id": ACTIVE_EXPERIMENT_ID,
         },
         root / "training_state.pt",
     )
     artifact = wandb.Artifact(
-        CHECKPOINT_ARTIFACT,
+        checkpoint_artifact_name(),
         type="checkpoint",
         metadata={
             "reason": reason,
@@ -1188,10 +1340,15 @@ def maybe_checkpoint(optimizer: Optimizer, scheduler: Any) -> None:
 
 
 def resume_from_wandb() -> None:
-    """Restore adapter, heads, cursors, calibration, and all RNG states from `latest`."""
-    if not CFG.resume_run_id:
+    """Restore adapter, heads, cursors, calibration, and all RNG states from latest."""
+    if (
+        not CFG.resume_run_id
+        or CFG.resume_experiment_id != ACTIVE_EXPERIMENT_ID
+    ):
         return
-    artifact = RUN.use_artifact(f"{CHECKPOINT_ARTIFACT}:latest", type="checkpoint")
+    artifact = RUN.use_artifact(
+        f"{checkpoint_artifact_name()}:latest", type="checkpoint"
+    )
     directory = Path(artifact.download())
     from safetensors.torch import load_file
     from peft import set_peft_model_state_dict
@@ -1200,6 +1357,7 @@ def resume_from_wandb() -> None:
     set_peft_model_state_dict(MODEL, adapter_weights)
     bundle = torch.load(directory / "training_state.pt", weights_only=False)
     assert bundle["dataset_fingerprint"] == DATASET_FINGERPRINT, "dataset changed since checkpoint"
+    assert bundle["experiment_id"] == ACTIVE_EXPERIMENT_ID, "checkpoint experiment mismatch"
     HEADS.load_state_dict(bundle["heads"])
     UNIT_POOLER.load_state_dict(bundle["unit_pooler"])
     TRAIN_STATE.update(bundle["train_state"])
@@ -1211,6 +1369,25 @@ def resume_from_wandb() -> None:
     torch.cuda.set_rng_state_all(rng["torch_cuda"])
     globals()["_RESUMED_OPTIMIZER_STATE"] = (bundle["optimizer"], bundle["scheduler"])
     print(f"Resumed run {RUN.id} at {TRAIN_STATE}")
+
+
+def restore_best_weights() -> None:
+    """Restore the best validation weights before the next stage or final evaluation."""
+    artifact = RUN.use_artifact(
+        f"{checkpoint_artifact_name()}:best", type="checkpoint"
+    )
+    directory = Path(artifact.download())
+    from safetensors.torch import load_file
+    from peft import set_peft_model_state_dict
+
+    adapter_weights = load_file(str(directory / "adapter" / "adapter_model.safetensors"))
+    set_peft_model_state_dict(MODEL, adapter_weights)
+    bundle = torch.load(directory / "training_state.pt", weights_only=False)
+    assert bundle["dataset_fingerprint"] == DATASET_FINGERPRINT
+    assert bundle["experiment_id"] == ACTIVE_EXPERIMENT_ID
+    HEADS.load_state_dict(bundle["heads"])
+    UNIT_POOLER.load_state_dict(bundle["unit_pooler"])
+    CALIBRATION.update(bundle["calibration"])
 
 
 _RESUMED_OPTIMIZER_STATE: tuple[Any, Any] | None = None
@@ -1242,6 +1419,44 @@ def epoch_document_order(epoch_key: int, n_documents: int) -> list[int]:
     return order
 
 
+@dataclass
+class WeightedLossMean:
+    totals: dict[str, float] = field(default_factory=lambda: defaultdict(float))
+    weight: float = 0.0
+
+    def add(self, values: dict[str, float], weight: float) -> None:
+        for name, value in values.items():
+            self.totals[name] += float(value) * weight
+        self.weight += weight
+
+    def means(self) -> dict[str, float]:
+        return {
+            name: total / max(self.weight, 1e-12)
+            for name, total in self.totals.items()
+        }
+
+
+def log_optimizer_step(
+    stage: str,
+    values: dict[str, float],
+    scheduler: Any,
+) -> None:
+    shared_loss = values.get("total", values.get("loss"))
+    payload = {
+        **{f"{stage}/{name}": value for name, value in values.items()},
+        **{f"train/{name}": value for name, value in values.items()},
+        f"{stage}/lr": scheduler.get_last_lr()[0],
+        "train/loss": shared_loss,
+        "train/stage": int(stage[-1]),
+        "experiment/id": ACTIVE_EXPERIMENT_ID,
+        "experiment/system": CFG.ablation,
+        "experiment/component_ablation": CFG.component_ablation,
+        "experiment/seed": CFG.seed,
+        "global_step": TRAIN_STATE["global_step"],
+    }
+    RUN.log(payload)
+
+
 def stage1_chunk_loss(
     document: DocumentExample, chunk: Chunk, mode: str
 ) -> tuple[torch.Tensor, int]:
@@ -1261,33 +1476,58 @@ def stage1_chunk_loss(
     return loss, len(chunk.unit_indices)
 
 
+def stage1_document_backward(document: DocumentExample, mode: str) -> float:
+    """Backpropagate a unit-weighted document mean, not one document per chunk."""
+    total_units = sum(len(chunk.unit_indices) for chunk in document.chunks)
+    document_mean = 0.0
+    for chunk in document.chunks:
+        loss, n_units = stage1_chunk_loss(document, chunk, mode)
+        fraction = n_units / max(total_units, 1)
+        scaled = (
+            loss
+            * fraction
+            * document.source_weight
+            / CFG.gradient_accumulation_docs
+        )
+        scaled.backward()
+        document_mean += float(loss.detach()) * fraction
+    return document_mean
+
+
 def run_stage_1() -> None:
-    curriculum = (
-        [("coarse", 0)] * CFG.stage1_coarse_epochs + [("fine", 0)] * CFG.stage1_fine_epochs
+    coarse_epochs = (
+        0 if CFG.component_ablation == "no_coarse_curriculum"
+        else CFG.stage1_coarse_epochs
     )
+    curriculum = [("coarse", 0)] * coarse_epochs + [
+        ("fine", 0)
+    ] * CFG.stage1_fine_epochs
     curriculum = [(mode, index) for index, (mode, _) in enumerate(curriculum)]
     documents = DOCS["train"]
     steps_per_epoch = math.ceil(len(documents) / CFG.gradient_accumulation_docs)
     optimizer, scheduler = build_optimizer(
-        lora=True, heads=True, total_steps=len(curriculum) * steps_per_epoch
+        lora=CFG.ablation != "A2",
+        pooler=True,
+        heads=True,
+        total_steps=len(curriculum) * steps_per_epoch,
     )
     adopt_resumed_optimizer(optimizer, scheduler)
     MODEL.train()
-    best_fine_f1 = -1.0
+    best_fine_f1 = float(TRAIN_STATE.get("best_stage1_macro_f1", -1.0))
     for mode, epoch in curriculum:
         if epoch < TRAIN_STATE["epoch"]:
             continue
         order = epoch_document_order(epoch, len(documents))
+        HEADS.train()
         accumulated = 0
+        batch_losses = WeightedLossMean()
         epoch_start = time.time()
         for cursor, doc_index in enumerate(order):
             if epoch == TRAIN_STATE["epoch"] and cursor < TRAIN_STATE["doc_cursor"]:
                 continue
             document = documents[doc_index]
-            for chunk in document.chunks:
-                loss, _ = stage1_chunk_loss(document, chunk, mode)
-                scaled = loss * document.source_weight / CFG.gradient_accumulation_docs
-                scaled.backward()
+            document_loss = stage1_document_backward(document, mode)
+            batch_losses.add({"loss": document_loss}, document.source_weight)
             accumulated += 1
             if accumulated == CFG.gradient_accumulation_docs or cursor == len(order) - 1:
                 torch.nn.utils.clip_grad_norm_(
@@ -1298,22 +1538,27 @@ def run_stage_1() -> None:
                 optimizer.zero_grad(set_to_none=True)
                 TRAIN_STATE["global_step"] += 1
                 accumulated = 0
-                RUN.log({
-                    "stage1/loss": float(loss), "stage1/mode": 0 if mode == "coarse" else 1,
-                    "stage1/lr": scheduler.get_last_lr()[0],
-                    "global_step": TRAIN_STATE["global_step"],
-                })
+                means = batch_losses.means()
+                means["mode"] = 0 if mode == "coarse" else 1
+                log_optimizer_step("stage1", means, scheduler)
+                batch_losses = WeightedLossMean()
                 TRAIN_STATE.update(epoch=epoch, doc_cursor=cursor + 1)
                 maybe_checkpoint(optimizer, scheduler)
         TRAIN_STATE.update(epoch=epoch + 1, doc_cursor=0)
         metrics = evaluate_unit_classifier("validation", mode)
-        RUN.log({f"stage1/val_{mode}_macro_f1": metrics["macro_f1"], "epoch": epoch})
+        RUN.log({
+            f"stage1/val_{mode}_macro_f1": metrics["macro_f1"],
+            "stage1/epoch": epoch,
+            "global_step": TRAIN_STATE["global_step"],
+        })
         print(f"stage1 epoch {epoch} ({mode}) macro-F1 {metrics['macro_f1']:.4f} "
               f"({time.time() - epoch_start:.0f}s)")
         if mode == "fine" and metrics["macro_f1"] > best_fine_f1:
             best_fine_f1 = metrics["macro_f1"]
-            save_checkpoint(optimizer, scheduler, reason="stage1-best")
-    save_checkpoint(optimizer, scheduler, reason="stage1-end")
+            TRAIN_STATE["best_stage1_macro_f1"] = best_fine_f1
+            save_checkpoint(optimizer, scheduler, best=True, reason="stage1-best")
+    restore_best_weights()
+    save_checkpoint(None, None, reason="stage1-end-restored-best")
 
 
 # %% [markdown]
@@ -1326,7 +1571,7 @@ def run_stage_1() -> None:
 
 # %%
 def cache_split_embeddings(split: str) -> dict[str, Path]:
-    directory = Path(CFG.cache_root) / split
+    directory = active_cache_root() / split
     directory.mkdir(parents=True, exist_ok=True)
     MODEL.eval()
     paths: dict[str, Path] = {}
@@ -1339,16 +1584,63 @@ def cache_split_embeddings(split: str) -> dict[str, Path]:
 
 
 def log_embedding_cache_artifact() -> None:
+    root = active_cache_root()
+    manifest = {
+        "fingerprint": DATASET_FINGERPRINT,
+        "experiment_id": ACTIVE_EXPERIMENT_ID,
+        "paths": {
+            split: {
+                row_id: str(path.relative_to(root))
+                for row_id, path in paths.items()
+            }
+            for split, paths in EMBEDDING_PATHS.items()
+        },
+    }
+    (root / "manifest.json").write_text(json.dumps(manifest, indent=2))
     artifact = wandb.Artifact(
-        f"plan-c-embeddings-{RUN.id}",
+        f"plan-c-embeddings-{RUN.id}-{safe_experiment_id(ACTIVE_EXPERIMENT_ID)}",
         type="embedding-cache",
         metadata={"fingerprint": DATASET_FINGERPRINT, "stage": TRAIN_STATE["stage"]},
     )
-    artifact.add_dir(CFG.cache_root)
-    RUN.log_artifact(artifact).wait()
+    artifact.add_dir(str(root))
+    RUN.log_artifact(artifact, aliases=["latest"]).wait()
 
 
 EMBEDDING_PATHS: dict[str, dict[str, Path]] = {}
+
+
+def restore_embedding_cache_artifact() -> None:
+    artifact_name = (
+        f"plan-c-embeddings-{RUN.id}-{safe_experiment_id(ACTIVE_EXPERIMENT_ID)}"
+    )
+    artifact = RUN.use_artifact(f"{artifact_name}:latest", type="embedding-cache")
+    root = Path(artifact.download())
+    manifest = json.loads((root / "manifest.json").read_text())
+    assert manifest["fingerprint"] == DATASET_FINGERPRINT, "embedding cache dataset changed"
+    assert manifest["experiment_id"] == ACTIVE_EXPERIMENT_ID
+    EMBEDDING_PATHS.clear()
+    EMBEDDING_PATHS.update({
+        split: {row_id: root / relative for row_id, relative in paths.items()}
+        for split, paths in manifest["paths"].items()
+    })
+    for paths in EMBEDDING_PATHS.values():
+        assert all(path.exists() for path in paths.values()), "embedding artifact is incomplete"
+
+
+def ensure_embedding_cache() -> None:
+    resuming_stage_2 = (
+        CFG.resume_run_id
+        and CFG.resume_experiment_id == ACTIVE_EXPERIMENT_ID
+        and TRAIN_STATE["stage"] == 2
+    )
+    if resuming_stage_2:
+        restore_embedding_cache_artifact()
+        print("Restored the Stage 2 embedding cache from W&B")
+        return
+    EMBEDDING_PATHS.clear()
+    for split in ("train", "validation"):
+        EMBEDDING_PATHS[split] = cache_split_embeddings(split)
+    log_embedding_cache_artifact()
 
 
 def cached_embeddings(split: str, document: DocumentExample) -> torch.Tensor:
@@ -1356,14 +1648,12 @@ def cached_embeddings(split: str, document: DocumentExample) -> torch.Tensor:
 
 
 def run_stage_2() -> None:
-    for split in ("train", "validation"):
-        EMBEDDING_PATHS[split] = cache_split_embeddings(split)
-    log_embedding_cache_artifact()
+    ensure_embedding_cache()
     documents = DOCS["train"]
     steps_per_epoch = math.ceil(len(documents) / CFG.gradient_accumulation_docs)
     max_epochs = CFG.stage2_max_epochs
     optimizer, scheduler = build_optimizer(
-        lora=False, heads=True, total_steps=max_epochs * steps_per_epoch
+        lora=False, pooler=False, heads=True, total_steps=max_epochs * steps_per_epoch
     )
     adopt_resumed_optimizer(optimizer, scheduler)
     patience_left = CFG.stage2_patience
@@ -1373,6 +1663,7 @@ def run_stage_2() -> None:
         HEADS.train()
         order = epoch_document_order(10_000 + epoch, len(documents))
         accumulated = 0
+        batch_losses = WeightedLossMean()
         for cursor, doc_index in enumerate(order):
             if epoch == TRAIN_STATE["epoch"] and cursor < TRAIN_STATE["doc_cursor"]:
                 continue
@@ -1380,6 +1671,10 @@ def run_stage_2() -> None:
             embeddings = cached_embeddings("train", document)
             loss, parts = structured_document_loss(embeddings, document, CFG.ablation)
             (loss * document.source_weight / CFG.gradient_accumulation_docs).backward()
+            batch_losses.add(
+                {"total": float(loss.detach()), **parts},
+                document.source_weight,
+            )
             accumulated += 1
             if accumulated == CFG.gradient_accumulation_docs or cursor == len(order) - 1:
                 torch.nn.utils.clip_grad_norm_(HEADS.parameters(), CFG.max_grad_norm)
@@ -1388,16 +1683,18 @@ def run_stage_2() -> None:
                 optimizer.zero_grad(set_to_none=True)
                 TRAIN_STATE["global_step"] += 1
                 accumulated = 0
-                RUN.log({
-                    **{f"stage2/{k}": v for k, v in parts.items()},
-                    "stage2/loss": float(loss), "global_step": TRAIN_STATE["global_step"],
-                })
+                log_optimizer_step("stage2", batch_losses.means(), scheduler)
+                batch_losses = WeightedLossMean()
                 TRAIN_STATE.update(epoch=epoch, doc_cursor=cursor + 1)
                 maybe_checkpoint(optimizer, scheduler)
         TRAIN_STATE.update(epoch=epoch + 1, doc_cursor=0)
         metrics = evaluate_split("validation", use_cache=True)
         span_f1 = metrics["span_macro_f1"]
-        RUN.log({"stage2/val_span_macro_f1": span_f1, "epoch": epoch})
+        RUN.log({
+            "stage2/val_span_macro_f1": span_f1,
+            "stage2/epoch": epoch,
+            "global_step": TRAIN_STATE["global_step"],
+        })
         print(f"stage2 epoch {epoch} span macro-F1 {span_f1:.4f}")
         if span_f1 > TRAIN_STATE["best_val_span_f1"]:
             TRAIN_STATE["best_val_span_f1"] = span_f1
@@ -1408,8 +1705,9 @@ def run_stage_2() -> None:
             if patience_left == 0:
                 print("stage2 early stop")
                 break
+    restore_best_weights()
     calibrate_boundary_filter()
-    save_checkpoint(optimizer, scheduler, reason="stage2-end")
+    save_checkpoint(None, None, reason="stage2-end-restored-best")
 
 
 def calibrate_boundary_filter(use_cache: bool = True) -> None:
@@ -1439,8 +1737,12 @@ def calibrate_boundary_filter(use_cache: bool = True) -> None:
             recall = retained / max(total, 1)
             if recall >= CFG.required_boundary_recall:
                 CALIBRATION.update(threshold=threshold, cap=cap)
-                RUN.log({"calibration/threshold": threshold, "calibration/cap": cap,
-                         "calibration/gold_recall": recall})
+                RUN.log({
+                    "calibration/threshold": threshold,
+                    "calibration/cap": cap,
+                    "calibration/gold_recall": recall,
+                    "global_step": TRAIN_STATE["global_step"],
+                })
                 print(f"calibrated threshold={threshold} cap={cap} recall={recall:.5f}")
                 return
     print("WARNING: no calibration met the 99.5% recall gate; keeping defaults")
@@ -1520,7 +1822,7 @@ def run_stage_3() -> None:
     steps_per_epoch = math.ceil(len(documents) / CFG.gradient_accumulation_docs)
     max_epochs = CFG.stage3_max_epochs
     optimizer, scheduler = build_optimizer(
-        lora=True, heads=True, total_steps=max_epochs * steps_per_epoch
+        lora=True, pooler=True, heads=True, total_steps=max_epochs * steps_per_epoch
     )
     adopt_resumed_optimizer(optimizer, scheduler)
     patience_left = CFG.stage3_patience
@@ -1532,10 +1834,13 @@ def run_stage_3() -> None:
         HEADS.train()
         order = epoch_document_order(20_000 + epoch, len(documents))
         accumulated = 0
+        batch_losses = WeightedLossMean()
         for cursor, doc_index in enumerate(order):
             if epoch == TRAIN_STATE["epoch"] and cursor < TRAIN_STATE["doc_cursor"]:
                 continue
-            parts = gradient_cache_document_backward(documents[doc_index])
+            document = documents[doc_index]
+            parts = gradient_cache_document_backward(document)
+            batch_losses.add(parts, document.source_weight)
             accumulated += 1
             if accumulated == CFG.gradient_accumulation_docs or cursor == len(order) - 1:
                 torch.nn.utils.clip_grad_norm_(all_parameters, CFG.max_grad_norm)
@@ -1544,16 +1849,18 @@ def run_stage_3() -> None:
                 optimizer.zero_grad(set_to_none=True)
                 TRAIN_STATE["global_step"] += 1
                 accumulated = 0
-                RUN.log({
-                    **{f"stage3/{k}": v for k, v in parts.items()},
-                    "global_step": TRAIN_STATE["global_step"],
-                })
+                log_optimizer_step("stage3", batch_losses.means(), scheduler)
+                batch_losses = WeightedLossMean()
                 TRAIN_STATE.update(epoch=epoch, doc_cursor=cursor + 1)
                 maybe_checkpoint(optimizer, scheduler)
         TRAIN_STATE.update(epoch=epoch + 1, doc_cursor=0)
         metrics = evaluate_split("validation", use_cache=False)
         span_f1 = metrics["span_macro_f1"]
-        RUN.log({"stage3/val_span_macro_f1": span_f1, "epoch": epoch})
+        RUN.log({
+            "stage3/val_span_macro_f1": span_f1,
+            "stage3/epoch": epoch,
+            "global_step": TRAIN_STATE["global_step"],
+        })
         print(f"stage3 epoch {epoch} span macro-F1 {span_f1:.4f}")
         if span_f1 > TRAIN_STATE["best_val_span_f1"]:
             TRAIN_STATE["best_val_span_f1"] = span_f1
@@ -1564,8 +1871,9 @@ def run_stage_3() -> None:
             if patience_left == 0:
                 print("stage3 early stop")
                 break
+    restore_best_weights()
     calibrate_boundary_filter(use_cache=False)  # Stage 3 moved the encoder; cache is stale
-    save_checkpoint(optimizer, scheduler, reason="stage3-end")
+    save_checkpoint(None, None, reason="stage3-end-restored-best")
 # %% [markdown]
 # ## Decoding, metrics, and artifact baselines
 #
@@ -1596,7 +1904,11 @@ def decode_document(
     """Viterbi (or ablation) decode -> (segments, confidences, filter statistics)."""
     HEADS.eval()
     with torch.no_grad():
-        if ablation in ("A2", "A3"):
+        independent = (
+            ablation in ("A2", "A3")
+            or CFG.component_ablation == "no_semicrf"
+        )
+        if independent:
             logits = HEADS.fine_classifier(embeddings)
             labels = logits.argmax(dim=1).tolist()
             probabilities = torch.softmax(logits, dim=1)
@@ -1610,7 +1922,11 @@ def decode_document(
                     )
                     start = index
             return segments, confidences, {"candidates": len(labels) + 1, "kept_gold": -1}
-        context = HEADS.document_encoder(embeddings)
+        context = (
+            embeddings
+            if CFG.component_ablation == "no_global_encoder"
+            else HEADS.document_encoder(embeddings)
+        )
         if len(document.units) > 1:
             gap_logits = HEADS.boundary(context)
         else:
@@ -1620,12 +1936,17 @@ def decode_document(
             len(document.units),
             CALIBRATION["threshold"],
             CALIBRATION["cap"],
-            keep_all=ablation in ("A4", "A5"),
+            keep_all=(
+                ablation in ("A4", "A5")
+                or CFG.component_ablation == "no_boundary_filter"
+            ),
         )
         graph = SemiCrfGraph.build(
             context, boundaries, HEADS.span_scorer, adjacent_only=ablation == "A4"
         )
-        transitions = HEADS.masked_transitions()
+        transitions = HEADS.masked_transitions(
+            monotonic=CFG.component_ablation != "no_monotonic_mask"
+        )
         segments = semicrf_viterbi(graph, transitions)
         confidences = semicrf_segment_posteriors(graph, transitions, segments)
         if ablation == "A4":  # merge same-label unit runs into spans for fair metrics
@@ -1724,6 +2045,11 @@ def evaluate_document(
     )
 
     serialized = serialize_document(document, segments, [1.0] * len(segments))
+    serialized_roundtrip = json.loads(json.dumps(serialized, ensure_ascii=False))
+    json_valid = (
+        set(serialized_roundtrip["sections"]) == set(CANONICAL_SECTIONS)
+        and isinstance(serialized_roundtrip["empty_sections"], list)
+    )
     gold_sections = parse_sections(json.dumps(
         {CANONICAL_SECTIONS[l]: [document.text[s:e] for ll, s, e in gold_chars if ll == l]
          for l in range(n_labels)}, ensure_ascii=False))
@@ -1746,6 +2072,7 @@ def evaluate_document(
         "section_exact": section_exact,
         "empty": empty,
         "json_exact": json_exact,
+        "json_valid": json_valid,
         "exact_span_micro": (
             len(predicted_set & gold_set), len(predicted_set - gold_set),
             len(gold_set - predicted_set),
@@ -1769,9 +2096,14 @@ def serialize_document(
     sections: dict[str, list[str]] = {key: [] for key in CANONICAL_SECTIONS}
     records: list[dict[str, Any]] = []
     previous_label = -1
+    enforce_monotonic = (
+        CFG.ablation not in ("A2", "A3")
+        and CFG.component_ablation not in ("no_semicrf", "no_monotonic_mask")
+    )
     for (start, end, label), confidence in zip(segments, confidences):
         assert 0 <= start < end <= len(document.units), "span outside the document"
-        assert label >= previous_label, "decoder emitted a backward label transition"
+        if enforce_monotonic:
+            assert label >= previous_label, "decoder emitted a backward label transition"
         previous_label = label
         start_char = document.units[start].start_char
         end_char = document.units[end - 1].end_char
@@ -1897,6 +2229,9 @@ def evaluate_split(
         "json_exact_match": float(np.mean([
             np.mean([m["json_exact"] for m in ms]) for ms in by_source.values()
         ])),
+        "json_valid_fraction": float(np.mean([
+            np.mean([m["json_valid"] for m in ms]) for ms in by_source.values()
+        ])),
         "filter_gold_recall": float(np.mean(kept_gold)) if kept_gold else 1.0,
         "filter_mean_candidates": total_candidates / max(decoded_docs, 1),
         "nonverbatim_fraction": float(
@@ -1911,7 +2246,10 @@ def evaluate_split(
         (split, log_prefix or ablation)
     ] = {sha: float(np.mean(v)) for sha, v in doc_f1_by_source.items()}
     if log_prefix:
-        RUN.log({f"{log_prefix}/{k}": v for k, v in result.items()})
+        RUN.log({
+            **{f"{log_prefix}/{k}": v for k, v in result.items()},
+            "global_step": TRAIN_STATE["global_step"],
+        })
     return result
 
 
@@ -2009,70 +2347,252 @@ def paired_bootstrap_delta(
 
 
 # %% [markdown]
-# ## Run the curriculum
+# ## Train — one cell
 #
-# Stages honour `CFG.run_stage_*`, the ablation flag, and any resumed cursor.
-# Each stage boundary logs a `latest` checkpoint Artifact.
+# The cell below runs the complete required matrix: A2-A5/C at the primary seed,
+# C at all three reporting seeds, and every named component ablation. Set
+# run_required_matrix=False in the hyperparameter cell for one selected diagnostic.
 
 # %%
-resume_from_wandb()
+@dataclass(frozen=True)
+class ExperimentSpec:
+    system: str
+    component_ablation: str
+    seed: int
 
-STAGE_PLAN = [
-    (1, run_stage_1, CFG.run_stage_1 and CFG.ablation != "A2"),
-    (2, run_stage_2, CFG.run_stage_2),
-    (3, run_stage_3, CFG.run_stage_3 and CFG.ablation in ("C", "A4", "A5")),
-]
-for stage_number, stage_fn, enabled in STAGE_PLAN:
-    if TRAIN_STATE["stage"] > stage_number:
-        continue
-    if TRAIN_STATE["stage"] < stage_number:
-        TRAIN_STATE.update(stage=stage_number, epoch=0, doc_cursor=0)
-    if enabled:
-        print(f"=== Stage {stage_number} ===")
-        stage_fn()
-    TRAIN_STATE.update(stage=stage_number + 1, epoch=0, doc_cursor=0)
+    @property
+    def experiment_id(self) -> str:
+        return f"{self.system}-{self.component_ablation}-seed{self.seed}"
+
+
+BASE_CFG = CFG
+
+
+def required_experiment_specs() -> list[ExperimentSpec]:
+    if not BASE_CFG.run_required_matrix:
+        return [
+            ExperimentSpec(
+                BASE_CFG.ablation,
+                BASE_CFG.component_ablation,
+                BASE_CFG.seed,
+            )
+        ]
+    specs = [
+        ExperimentSpec(system, "none", BASE_CFG.seed)
+        for system in BASE_CFG.systems
+    ]
+    specs.extend(
+        ExperimentSpec("C", "none", seed)
+        for seed in BASE_CFG.reporting_seeds
+        if seed != BASE_CFG.seed
+    )
+    specs.extend(
+        ExperimentSpec("C", component, BASE_CFG.seed)
+        for component in BASE_CFG.component_ablations
+    )
+    return specs
+
+
+def reset_trainable_stack(spec: ExperimentSpec) -> None:
+    global _RESUMED_OPTIMIZER_STATE
+    seed_everything(spec.seed)
+    for root in (UNIT_POOLER, HEADS):
+        for module in root.modules():
+            reset = getattr(module, "reset_parameters", None)
+            if callable(reset):
+                reset()
+    with torch.no_grad():
+        HEADS.transition.zero_()
+        HEADS.span_scorer.bias.zero_()
+
+    adapter_names = list(MODEL.peft_config)
+    for module in MODEL.modules():
+        reset_lora = getattr(module, "reset_lora_parameters", None)
+        if callable(reset_lora):
+            for adapter_name in adapter_names:
+                reset_lora(adapter_name, True)
+    lora_enabled = spec.system != "A2"
+    for name, parameter in MODEL.named_parameters():
+        if "lora_" in name:
+            parameter.requires_grad_(lora_enabled)
+
+    MODEL.zero_grad(set_to_none=True)
+    UNIT_POOLER.zero_grad(set_to_none=True)
+    HEADS.zero_grad(set_to_none=True)
+    global_step = int(TRAIN_STATE.get("global_step", 0))
+    TRAIN_STATE.clear()
+    TRAIN_STATE.update({
+        "stage": 1,
+        "epoch": 0,
+        "doc_cursor": 0,
+        "accum_cursor": 0,
+        "global_step": global_step,
+        "best_stage1_macro_f1": -1.0,
+        "best_val_span_f1": -1.0,
+    })
+    CALIBRATION.clear()
+    CALIBRATION.update({
+        "threshold": CFG.boundary_threshold,
+        "cap": CFG.candidate_cap,
+    })
+    EMBEDDING_PATHS.clear()
+    _RESUMED_OPTIMIZER_STATE = None
+    is_resumed_experiment = (
+        CFG.resume_run_id
+        and CFG.resume_experiment_id == ACTIVE_EXPERIMENT_ID
+    )
+    if not is_resumed_experiment:
+        for ephemeral_root in (active_cache_root(), active_checkpoint_root()):
+            if ephemeral_root.exists():
+                shutil.rmtree(ephemeral_root)
+    torch.cuda.empty_cache()
+
+
+def run_curriculum() -> None:
+    structured_system = CFG.ablation not in ("A2", "A3")
+    stage_plan = [
+        (1, run_stage_1, CFG.run_stage_1),
+        (2, run_stage_2, CFG.run_stage_2 and structured_system),
+        (
+            3,
+            run_stage_3,
+            CFG.run_stage_3
+            and structured_system
+            and CFG.component_ablation != "no_stage3",
+        ),
+    ]
+    for stage_number, stage_fn, enabled in stage_plan:
+        if TRAIN_STATE["stage"] > stage_number:
+            continue
+        if TRAIN_STATE["stage"] < stage_number:
+            TRAIN_STATE.update(stage=stage_number, epoch=0, doc_cursor=0)
+        if enabled:
+            print(f"=== {ACTIVE_EXPERIMENT_ID}: Stage {stage_number} ===")
+            stage_fn()
+        TRAIN_STATE.update(stage=stage_number + 1, epoch=0, doc_cursor=0)
+        if enabled:
+            save_checkpoint(None, None, reason=f"stage{stage_number}-boundary")
+    save_checkpoint(None, None, reason="experiment-complete")
+
+
+def measured_promotion_gates(
+    validation: dict[str, float],
+    ci_low: float,
+) -> dict[str, bool]:
+    return {
+        "all_rows_aligned": all(
+            AUDIT[split]["aligned_rows"] == AUDIT[split]["raw_rows"]
+            and AUDIT[split]["alignment_failures"] == 0
+            for split in AUDIT
+        ),
+        "no_label_truncation": all(
+            AUDIT[split]["label_truncations"] == 0 for split in AUDIT
+        ),
+        "gold_roundtrip_100pct": all(
+            AUDIT[split]["roundtrip_rows"] == AUDIT[split]["raw_rows"]
+            for split in AUDIT
+        ),
+        "boundary_candidate_recall": (
+            validation["filter_gold_recall"] >= CFG.required_boundary_recall
+        ),
+        "json_validity_100pct": validation["json_valid_fraction"] == 1.0,
+        "verbatim_source_slices": validation["nonverbatim_fraction"] == 0.0,
+        "peak_memory_below_gpu_limit": validation["peak_gpu_gib"] < GPU_GB,
+        "beats_strongest_baseline_ci": ci_low > 0.0,
+    }
+
+
+def run_required_experiments() -> dict[str, Any]:
+    global CFG, ACTIVE_EXPERIMENT_ID
+    baselines = evaluate_baselines("validation")
+    strongest = max(
+        baselines, key=lambda name: baselines[name]["span_macro_f1"]
+    )
+    completed = set(RUN.summary.get("completed_experiments", []))
+    results = dict(RUN.summary.get("experiment_results", {}))
+    for spec in required_experiment_specs():
+        ACTIVE_EXPERIMENT_ID = spec.experiment_id
+        if ACTIVE_EXPERIMENT_ID in completed:
+            print(f"Skipping completed experiment {ACTIVE_EXPERIMENT_ID}")
+            continue
+        CFG = dataclasses.replace(
+            BASE_CFG,
+            seed=spec.seed,
+            ablation=spec.system,
+            component_ablation=spec.component_ablation,
+        )
+        reset_trainable_stack(spec)
+        RUN.config.update({
+            f"experiments/{ACTIVE_EXPERIMENT_ID}": asdict(spec)
+        }, allow_val_change=True)
+        resume_from_wandb()
+        run_curriculum()
+
+        log_prefix = f"validation/{safe_experiment_id(ACTIVE_EXPERIMENT_ID)}"
+        validation = evaluate_split(
+            "validation",
+            use_cache=False,
+            log_prefix=log_prefix,
+        )
+        delta, low, high = paired_bootstrap_delta(
+            DOC_SPAN_F1[("validation", log_prefix)],
+            DOC_SPAN_F1[
+                ("validation", f"baseline_{strongest.lower()}_validation")
+            ],
+        )
+        gates = measured_promotion_gates(validation, low)
+        results[ACTIVE_EXPERIMENT_ID] = {
+            "spec": asdict(spec),
+            "validation": validation,
+            "strongest_baseline": strongest,
+            "delta_vs_baseline": delta,
+            "delta_ci": [low, high],
+            "gates": gates,
+        }
+        RUN.log({
+            **{
+                f"gates/{safe_experiment_id(ACTIVE_EXPERIMENT_ID)}/{name}": float(ok)
+                for name, ok in gates.items()
+            },
+            "global_step": TRAIN_STATE["global_step"],
+        })
+        completed.add(ACTIVE_EXPERIMENT_ID)
+        RUN.summary["completed_experiments"] = sorted(completed)
+        RUN.summary["experiment_results"] = results
+        print(json.dumps(results[ACTIVE_EXPERIMENT_ID], indent=2))
+        if baselines[strongest]["span_macro_f1"] >= validation["span_macro_f1"] - 1e-6:
+            print(
+                "FAILED SEMANTIC-LEARNING EXPERIMENT: "
+                f"{strongest} matches or beats {ACTIVE_EXPERIMENT_ID}."
+            )
+    return {"baselines": baselines, "experiments": results}
+
+
+EXPERIMENT_RESULTS = run_required_experiments()
 
 # %% [markdown]
 # ## Validation report, baselines, and promotion gates
 
 # %%
-VAL_METRICS = evaluate_split("validation", use_cache=False, log_prefix="val")
-print(json.dumps(VAL_METRICS, indent=2))
-VAL_BASELINES = evaluate_baselines("validation")
-for name, metrics in VAL_BASELINES.items():
-    print(name, {k: round(v, 4) for k, v in metrics.items() if "f1" in k})
-
-STRONGEST_BASELINE = max(VAL_BASELINES, key=lambda k: VAL_BASELINES[k]["span_macro_f1"])
-delta, low, high = paired_bootstrap_delta(
-    DOC_SPAN_F1[("validation", "val")],
-    DOC_SPAN_F1[("validation", f"baseline_{STRONGEST_BASELINE.lower()}_validation")],
-)
-print(f"val ΔF1 vs {STRONGEST_BASELINE}: {delta:.4f} [{low:.4f}, {high:.4f}]")
-
-GATES = {
-    "all_rows_aligned": all(AUDIT[s]["rows"] == len(DOCS[s]) for s in DOCS),
-    "no_label_truncation": True,  # units cover every gold span by construction (asserted)
-    "gold_roundtrip_100pct": True,  # prepare_document asserts verbatim round-trip per row
-    "boundary_candidate_recall": VAL_METRICS["filter_gold_recall"]
-    >= CFG.required_boundary_recall,
-    "json_validity_100pct": VAL_METRICS["nonverbatim_fraction"] == 0.0,
-    "verbatim_source_slices": VAL_METRICS["nonverbatim_fraction"] == 0.0,
-    "peak_memory_below_a100": VAL_METRICS["peak_gpu_gib"] < 39.0,
-    "beats_strongest_baseline_ci": low > 0.0,
-}
-RUN.log({f"gates/{name}": float(ok) for name, ok in GATES.items()})
-print(json.dumps(GATES, indent=2))
-if (
-    VAL_BASELINES[STRONGEST_BASELINE]["span_macro_f1"]
-    >= VAL_METRICS["span_macro_f1"] - 1e-6
-):
-    print(
-        "RESULT MUST BE REPORTED AS A FAILED SEMANTIC-LEARNING EXPERIMENT: "
-        f"the {STRONGEST_BASELINE} artifact baseline matches Plan C."
-    )
+PRIMARY_EXPERIMENT_ID = ExperimentSpec("C", "none", BASE_CFG.seed).experiment_id
+PRIMARY_RESULT = EXPERIMENT_RESULTS["experiments"].get(PRIMARY_EXPERIMENT_ID)
+if PRIMARY_RESULT is None:
+    raise RuntimeError(f"Primary experiment {PRIMARY_EXPERIMENT_ID} did not complete")
+print(json.dumps({
+    "experiment": PRIMARY_EXPERIMENT_ID,
+    **PRIMARY_RESULT,
+}, indent=2))
 
 # %%
 # Qualitative check: serialize the first validation document with predicted spans.
+ACTIVE_EXPERIMENT_ID = PRIMARY_EXPERIMENT_ID
+CFG = dataclasses.replace(
+    BASE_CFG,
+    seed=BASE_CFG.seed,
+    ablation="C",
+    component_ablation="none",
+)
+restore_best_weights()
 _doc = DOCS["validation"][0]
 _segments, _confidences, _ = decode_document(
     _doc, encode_document(_doc, with_grad=False).float(), CFG.ablation
@@ -2092,31 +2612,47 @@ for record in _serialized["records"][:8]:
 # is frozen. The cell restores the `best` checkpoint before touching the test split.
 
 # %%
-if CFG.run_final_test:
-    artifact = RUN.use_artifact(f"{CHECKPOINT_ARTIFACT}:best", type="checkpoint")
-    directory = Path(artifact.download())
-    from safetensors.torch import load_file
-    from peft import set_peft_model_state_dict
-
-    set_peft_model_state_dict(
-        MODEL, load_file(str(directory / "adapter" / "adapter_model.safetensors"))
-    )
-    bundle = torch.load(directory / "training_state.pt", weights_only=False)
-    HEADS.load_state_dict(bundle["heads"])
-    UNIT_POOLER.load_state_dict(bundle["unit_pooler"])
-    CALIBRATION.update(bundle["calibration"])
-
-    TEST_METRICS = evaluate_split("test", use_cache=False, log_prefix="test")
+if BASE_CFG.run_final_test:
     TEST_BASELINES = evaluate_baselines("test")
-    t_delta, t_low, t_high = paired_bootstrap_delta(
-        DOC_SPAN_F1[("test", "test")],
-        DOC_SPAN_F1[("test", f"baseline_{STRONGEST_BASELINE.lower()}_test")],
+    TEST_STRONGEST_BASELINE = max(
+        TEST_BASELINES,
+        key=lambda name: TEST_BASELINES[name]["span_macro_f1"],
     )
-    RUN.summary["test/span_macro_f1"] = TEST_METRICS["span_macro_f1"]
-    RUN.summary["test/delta_vs_baseline"] = t_delta
-    RUN.summary["test/delta_ci"] = [t_low, t_high]
-    print(json.dumps(TEST_METRICS, indent=2))
-    print(f"test ΔF1 vs {STRONGEST_BASELINE}: {t_delta:.4f} [{t_low:.4f}, {t_high:.4f}]")
+    TEST_RESULTS = {}
+    for reporting_seed in BASE_CFG.reporting_seeds:
+        ACTIVE_EXPERIMENT_ID = ExperimentSpec(
+            "C", "none", reporting_seed
+        ).experiment_id
+        if ACTIVE_EXPERIMENT_ID not in EXPERIMENT_RESULTS["experiments"]:
+            raise RuntimeError(f"Missing reporting-seed checkpoint: {ACTIVE_EXPERIMENT_ID}")
+        CFG = dataclasses.replace(
+            BASE_CFG,
+            seed=reporting_seed,
+            ablation="C",
+            component_ablation="none",
+        )
+        restore_best_weights()
+        test_prefix = f"test/{safe_experiment_id(ACTIVE_EXPERIMENT_ID)}"
+        test_metrics = evaluate_split(
+            "test", use_cache=False, log_prefix=test_prefix
+        )
+        t_delta, t_low, t_high = paired_bootstrap_delta(
+            DOC_SPAN_F1[("test", test_prefix)],
+            DOC_SPAN_F1[
+                (
+                    "test",
+                    f"baseline_{TEST_STRONGEST_BASELINE.lower()}_test",
+                )
+            ],
+        )
+        TEST_RESULTS[ACTIVE_EXPERIMENT_ID] = {
+            "metrics": test_metrics,
+            "strongest_baseline": TEST_STRONGEST_BASELINE,
+            "delta_vs_baseline": t_delta,
+            "delta_ci": [t_low, t_high],
+        }
+    RUN.summary["test/reporting_seeds"] = TEST_RESULTS
+    print(json.dumps(TEST_RESULTS, indent=2))
 else:
     print("run_final_test=False — test split untouched (single-shot policy).")
 
