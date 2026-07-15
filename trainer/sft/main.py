@@ -24,13 +24,17 @@ if __package__ in {None, ""}:
     from trainer.sft.data import (
         choose_max_length,
         format_dataset,
+        length_cache_path,
+        load_cached_lengths,
         load_or_measure_lengths,
         load_splits,
     )
     from trainer.sft.tracking import (
+        fetch_length_cache,
         finish_wandb,
         initialize_wandb,
         log_model_artifact,
+        upload_length_cache,
     )
     from trainer.sft.training import build_trainer
     from trainer.sft.transformer import (
@@ -46,10 +50,18 @@ else:
     from .data import (
         choose_max_length,
         format_dataset,
+        length_cache_path,
+        load_cached_lengths,
         load_or_measure_lengths,
         load_splits,
     )
-    from .tracking import finish_wandb, initialize_wandb, log_model_artifact
+    from .tracking import (
+        fetch_length_cache,
+        finish_wandb,
+        initialize_wandb,
+        log_model_artifact,
+        upload_length_cache,
+    )
     from .training import build_trainer
     from .transformer import (
         attach_lora,
@@ -140,9 +152,31 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
         eval_dataset = format_dataset(eval_dataset, tokenizer)
 
         _stage(7, total_stages, "Measure token lengths and select context")
+        cache_path = length_cache_path(config.data)
+        reuse_cache = (
+            _is_rank_zero()
+            and wandb_run is not None
+            and config.tracking.reuse_length_cache
+        )
+        if reuse_cache and load_cached_lengths(train_dataset, config.data) is None:
+            fetch_length_cache(wandb_run, cache_path, config.tracking)
+        # Checked before measuring so a stale download still triggers an upload.
+        measured = load_cached_lengths(train_dataset, config.data) is None
         lengths = load_or_measure_lengths(
             train_dataset, tokenizer, config.data
         )
+        if reuse_cache and measured:
+            upload_length_cache(
+                wandb_run,
+                cache_path,
+                config.tracking,
+                {
+                    "repository": config.data.repository,
+                    "subset": config.data.subset,
+                    "split": config.data.train_split,
+                    "rows": len(lengths),
+                },
+            )
         profile = choose_max_length(
             lengths,
             config.model.max_seq_length,

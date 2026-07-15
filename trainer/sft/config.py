@@ -82,6 +82,9 @@ class TrackingConfig:
     artifact_aliases: tuple[str, ...] = ("latest",)
     upload_adapter: bool = True
     upload_timeout_seconds: int = 3_600
+    length_cache_artifact_name: str = "sft-token-lengths"
+    length_cache_artifact_type: str = "dataset"
+    reuse_length_cache: bool = True
 
 
 @dataclass(frozen=True)

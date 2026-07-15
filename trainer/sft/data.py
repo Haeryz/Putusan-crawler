@@ -71,12 +71,32 @@ def measure_token_lengths(
 ) -> list[int]:
     """Measure formatted examples with batched tokenizer calls."""
 
+    # The fast tokenizer's Rust threads sit idle unless this is set: importing
+    # transformers disables them so forked dataloader workers cannot deadlock.
+    # Nothing is forked here, and the batches below are what they parallelize.
+    os.environ["TOKENIZERS_PARALLELISM"] = "true"
+
+    total = len(texts)
     lengths: list[int] = []
-    for start in range(0, len(texts), batch_size):
+    started = time.monotonic()
+    for start in range(0, total, batch_size):
         encoded = tokenizer(
             texts[start : start + batch_size], add_special_tokens=False
         )["input_ids"]
         lengths.extend(len(token_ids) for token_ids in encoded)
+
+        elapsed = time.monotonic() - started
+        rate = len(lengths) / elapsed if elapsed else 0.0
+        remaining = (
+            f", ~{(total - len(lengths)) / rate / 60:.1f} min left"
+            if rate > 0 and len(lengths) < total
+            else ""
+        )
+        print(
+            f"  {len(lengths)}/{total} examples "
+            f"({100 * len(lengths) / total:5.1f}%) at {rate:.0f}/s{remaining}",
+            flush=True,
+        )
     return lengths
 
 
@@ -125,6 +145,29 @@ def choose_max_length(
     return profile
 
 
+def length_cache_path(config: DataConfig) -> Path:
+    """Return the file holding one cached token count per training row."""
+
+    return Path(config.cache_dir) / "token_lengths.npy"
+
+
+def load_cached_lengths(dataset: Any, config: DataConfig) -> list[int] | None:
+    """Return cached counts, or None when they are absent or stale."""
+
+    import numpy as np
+
+    cache_path = length_cache_path(config)
+    if not cache_path.exists():
+        return None
+    try:
+        cached = np.load(cache_path)
+    except (OSError, ValueError):
+        return None
+    if len(cached) != len(dataset):
+        return None
+    return [int(value) for value in cached]
+
+
 def load_or_measure_lengths(
     dataset: Any, tokenizer_or_processor: Any, config: DataConfig
 ) -> list[int]:
@@ -132,18 +175,10 @@ def load_or_measure_lengths(
 
     import numpy as np
 
-    cache_path = Path(config.cache_dir) / "token_lengths.npy"
+    cache_path = length_cache_path(config)
 
     def load_valid_cache() -> list[int] | None:
-        if not cache_path.exists():
-            return None
-        try:
-            cached = np.load(cache_path)
-        except (OSError, ValueError):
-            return None
-        if len(cached) != len(dataset):
-            return None
-        return [int(value) for value in cached]
+        return load_cached_lengths(dataset, config)
 
     cached_lengths = load_valid_cache()
     if cached_lengths is not None:
