@@ -77,12 +77,23 @@ def validate_hardware(config: ModelConfig) -> list[tuple[str, float]]:
     return devices
 
 
+def _progress(message: str) -> None:
+    """Report a long silent step on rank zero."""
+
+    if int(os.environ.get("RANK", "0")) == 0:
+        print(message, flush=True)
+
+
 def load_base_model(config: ModelConfig) -> tuple[Any, Any]:
     """Load the text-only 4-bit model with Unsloth long-context patches."""
 
+    # Both steps below can run for minutes without printing anything, so name
+    # them before they start rather than leaving a bare cursor.
+    _progress("  Importing Unsloth (patches kernels on first import)...")
     import torch
     from unsloth import FastLanguageModel
 
+    _progress(f"  Loading {config.model_name} in 4-bit (cached by setup)...")
     return FastLanguageModel.from_pretrained(
         model_name=config.model_name,
         max_seq_length=config.max_seq_length,

@@ -24,7 +24,7 @@ Create a RunPod Pod with:
 
 The volume matters more than it first appears: container storage is erased on
 every **Stop**, not only when a Pod is replaced. Keep the repository, the
-environment, and the model caches on **/workspace**. See section 7.
+environment, and the model caches on **/workspace**. See section 8.
 
 ## 2. Configure SSH on the local machine
 
@@ -126,7 +126,7 @@ ssh sinergi-runpod
    ~~~
 
    Cloning under **/workspace** is required, not stylistic: everything outside
-   it is erased on Stop. See section 7.
+   it is erased on Stop. See section 8.
 
 4. Open the folder with **File > Open Folder > /workspace/Sinergi**. Do not run
    `code .` here — inside an already-remote window it opens a redundant second
@@ -145,7 +145,27 @@ extensions, debugger, and integrated terminals run on RunPod. Opening a local
 Sinergi window and opening a RunPod window are different; always check the
 lower-left SSH indicator before starting an expensive job.
 
-## 4. Install the GPU environment
+## 4. Download the weights
+
+Redirect the caches onto the volume **first** — see section 8. The downloader
+refuses to run without `HF_HOME`, because the weights would otherwise land on
+the container disk and be wiped by the next Stop.
+
+~~~bash
+cd /workspace/Sinergi
+export HF_HOME=/workspace/.cache/huggingface
+bash trainer/sft/download_model.sh
+~~~
+
+This fetches **Qwen/Qwen3.5-4B** (~9.3 GB) and prints the path it used. There is
+no pre-quantized 4-bit repo for this model, so the full bf16 checkpoint is
+downloaded once and quantized at load time. It runs on a throwaway uv
+environment, so it works before the GPU stack exists.
+
+Keeping the transfer in its own step means it shows real progress bars, instead
+of hiding behind the silent Unsloth import at stage 3 of a training run.
+
+## 5. Install the GPU environment
 
 In the remote terminal:
 
@@ -158,7 +178,13 @@ source .venv/bin/activate
 The setup follows the pinned versions from the original notebook. Run it once
 per persistent environment, not before every training run.
 
-## 5. Authenticate without committing secrets
+Its last step loads the cached weights in 4-bit once. That pays for the silent
+Unsloth import and its Triton kernel compile here, and fails fast if the
+checkpoint cannot be quantized on this GPU — before you spend GPU time getting
+three stages into a training run. Note that bitsandbytes re-quantizes on every
+load, so this warms the caches; it does not write a 4-bit checkpoint to disk.
+
+## 6. Authenticate without committing secrets
 
 Set credentials through RunPod Secrets/environment variables or export them
 only in the remote shell:
@@ -172,9 +198,9 @@ wandb login
 Do not put either token in Python, Git, **.vscode**, or a committed **.env**.
 The default W&B project is **putusan-sft**.
 
-## 6. Run the complete job
+## 7. Run the complete job
 
-Confirm the hardware profile first — see section 8. The shortest command is:
+Confirm the hardware profile first — see section 9. The shortest command is:
 
 ~~~bash
 cd /workspace/Sinergi
@@ -220,7 +246,7 @@ python main.py
 # Detach with Ctrl+B, then D. Reattach with: tmux attach -t putusan-sft
 ~~~
 
-## 7. Persistence across Stop
+## 8. Persistence across Stop
 
 **Stop** releases the GPUs, keeps the Pod ID, preserves the volume disk
 (**/workspace**), and **erases the container disk** — everything else, including
@@ -242,7 +268,7 @@ error; the run just starts slowly.
 
 Already safe, because they resolve under the repo on the volume:
 
-- **.venv** — so section 4 is once per Pod, not once per restart
+- **.venv** — so section 5 is once per Pod, not once per restart
 - **outputs/sft/cache** — the cached token-length measurement
 - **outputs/sft/checkpoints/**, **qwen_extractor_sft_lora/**
 
@@ -255,13 +281,13 @@ Secrets to avoid re-exporting them each restart.
 
 ### Resuming after a Stop
 
-1. Start the Pod, and confirm it actually got its GPUs (section 8).
+1. Start the Pod, and confirm it actually got its GPUs (section 9).
 2. **Remote-SSH: Connect to Host > sinergi-runpod** — no config edit, if you
    used the proxy form.
 3. `cd /workspace/Sinergi && git pull`
 4. tmux, activate **.venv**, `python main.py`.
 
-## 8. Hardware profile
+## 9. Hardware profile
 
 `validate_hardware` enforces the two-A100 profile and aborts at stage 1 of 11,
 before any training work:
