@@ -39,11 +39,13 @@ def build_trainer(
             learning_rate=config.learning_rate,
             logging_steps=config.logging_steps,
             optim="adamw_8bit",
+            
             weight_decay=config.weight_decay,
             lr_scheduler_type="linear",
             seed=config.seed,
             output_dir=str(config.output_dir),
-            report_to=config.report_to,
+            report_to=config.report
+            _to,
             max_length=max_length,
             packing=False,
             bf16=True,

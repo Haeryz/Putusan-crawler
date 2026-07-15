@@ -11,18 +11,20 @@ from trainer.sft.transformer import (
 )
 
 
-def test_two_a100_80gb_defaults_are_explicit() -> None:
+def test_short_single_a100_experiment_defaults_are_explicit() -> None:
     config = RunConfig()
 
     assert config.model.model_name == "Qwen/Qwen3.5-4B"
     assert config.model.max_seq_length == 49_152
-    assert config.model.required_gpu_count == 2
+    assert config.model.required_gpu_count == 1
+    assert config.model.require_distributed_launch is False
     assert config.model.minimum_vram_gb == 78.0
     assert config.data.subset == "sft_sections"
-    assert config.training.max_steps == 100
-    assert config.training.per_device_train_batch_size == 2
-    assert config.training.gradient_accumulation_steps == 2
-    assert config.training.effective_batch_size(world_size=2) == 8
+    assert config.training.max_steps == 30
+    assert config.training.eval_steps == 10
+    assert config.training.per_device_train_batch_size == 1
+    assert config.training.gradient_accumulation_steps == 8
+    assert config.training.effective_batch_size(world_size=1) == 8
     assert config.tracking.project == "putusan-sft"
     assert config.tracking.upload_adapter is True
 
@@ -32,6 +34,10 @@ def test_cli_accepts_training_overrides() -> None:
         [
             "--max-steps",
             "7",
+            "--eval-steps",
+            "2",
+            "--gpu-count",
+            "2",
             "--per-device-batch-size",
             "1",
             "--gradient-accumulation-steps",
@@ -45,6 +51,8 @@ def test_cli_accepts_training_overrides() -> None:
     )
 
     assert args.max_steps == 7
+    assert args.eval_steps == 2
+    assert args.gpu_count == 2
     assert args.per_device_batch_size == 1
     assert args.gradient_accumulation_steps == 4
     assert args.allow_non_a100 is True
@@ -53,13 +61,16 @@ def test_cli_accepts_training_overrides() -> None:
 
     config = config_from_args(args)
     assert config.training.max_steps == 7
+    assert config.training.eval_steps == 2
+    assert config.model.required_gpu_count == 2
+    assert config.model.require_distributed_launch is True
     assert config.tracking.project == "court-extractor"
     assert config.tracking.artifact_name == "stage-1-lora"
     assert config.tracking.upload_adapter is True
 
 
-def test_two_worker_torchrun_environment_is_required() -> None:
-    config = RunConfig()
+def test_two_worker_torchrun_environment_is_required_for_two_gpu_override() -> None:
+    config = config_from_args(build_parser().parse_args(["--gpu-count", "2"]))
 
     assert validate_distributed_launch(
         config.model, {"WORLD_SIZE": "2"}
@@ -73,7 +84,7 @@ def test_effective_batch_rejects_invalid_world_size() -> None:
         RunConfig().training.effective_batch_size(0)
 
 
-def test_hardware_profile_checks_both_gpus_and_selects_local_rank(
+def test_hardware_profile_checks_single_default_gpu(
     monkeypatch,
 ) -> None:
     selected: list[int] = []
@@ -100,11 +111,10 @@ def test_hardware_profile_checks_both_gpus_and_selects_local_rank(
             selected.append(index)
 
     monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=FakeCuda))
-    monkeypatch.setenv("WORLD_SIZE", "2")
-    monkeypatch.setenv("LOCAL_RANK", "1")
+    monkeypatch.setenv("WORLD_SIZE", "1")
 
     devices = validate_hardware(RunConfig().model)
 
-    assert len(devices) == 2
+    assert len(devices) == 1
     assert all(vram_gb == 80.0 for _, vram_gb in devices)
-    assert selected == [1]
+    assert selected == []
