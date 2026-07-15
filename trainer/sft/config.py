@@ -8,7 +8,7 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """Qwen/Unsloth model, LoRA, and two-GPU hardware settings."""
+    """Qwen/Unsloth model, LoRA, and GPU hardware settings."""
 
     model_name: str = "Qwen/Qwen3.5-4B"
     max_seq_length: int = 49_152
@@ -16,9 +16,9 @@ class ModelConfig:
     lora_rank: int = 32
     lora_alpha: int = 32
     require_a100: bool = True
-    required_gpu_count: int = 2
+    required_gpu_count: int = 1
     minimum_vram_gb: float = 78.0
-    require_distributed_launch: bool = True
+    require_distributed_launch: bool = False
 
 
 @dataclass(frozen=True)
@@ -40,17 +40,17 @@ class DataConfig:
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    """TRL settings tuned for two A100 80GB GPUs."""
+    """TRL settings for the short single-A100 validation experiment."""
 
     output_dir: Path = Path("outputs/sft/checkpoints")
     adapter_dir: Path = Path("qwen_extractor_sft_lora")
-    per_device_train_batch_size: int = 2
-    gradient_accumulation_steps: int = 2
+    per_device_train_batch_size: int = 1
+    gradient_accumulation_steps: int = 8
     warmup_steps: int = 5
-    max_steps: int = 100
+    max_steps: int = 30
     learning_rate: float = 2e-4
     logging_steps: int = 1
-    eval_steps: int = 20
+    eval_steps: int = 10
     weight_decay: float = 0.001
     seed: int = 3407
     report_to: str = "wandb"

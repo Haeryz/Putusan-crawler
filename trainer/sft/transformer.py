@@ -19,7 +19,7 @@ def distributed_world_size(environ: dict[str, str] | None = None) -> int:
 def validate_distributed_launch(
     config: ModelConfig, environ: dict[str, str] | None = None
 ) -> int:
-    """Require one DDP worker per GPU for the default two-GPU profile."""
+    """Require one DDP worker per GPU for a multi-GPU profile."""
 
     world_size = distributed_world_size(environ)
     if (
@@ -35,7 +35,7 @@ def validate_distributed_launch(
 
 
 def validate_hardware(config: ModelConfig) -> list[tuple[str, float]]:
-    """Validate the two-A100-80GB profile assumed by this recipe."""
+    """Validate the configured A100-80GB hardware profile."""
 
     import torch
 

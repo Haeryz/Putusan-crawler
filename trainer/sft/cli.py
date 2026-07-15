@@ -20,6 +20,9 @@ def positive_int(value: str) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # Hyperparameters are defined in config.py; the flags below only override
+    # those defaults, so they must read from it rather than restate values.
+    defaults = RunConfig()
     parser = argparse.ArgumentParser(
         description="Fine-tune Qwen3.5-4B for per-section putusan extraction"
     )
@@ -28,11 +31,29 @@ def build_parser() -> argparse.ArgumentParser:
         "--dataset", default="Haeryz/putusan-structured-extraction"
     )
     parser.add_argument("--dataset-config", default="sft_sections")
-    parser.add_argument("--max-steps", type=positive_int, default=100)
-    parser.add_argument("--max-seq-length", type=positive_int, default=49_152)
-    parser.add_argument("--per-device-batch-size", type=positive_int, default=2)
     parser.add_argument(
-        "--gradient-accumulation-steps", type=positive_int, default=2
+        "--max-steps", type=positive_int, default=defaults.training.max_steps
+    )
+    parser.add_argument(
+        "--eval-steps", type=positive_int, default=defaults.training.eval_steps
+    )
+    parser.add_argument(
+        "--gpu-count", type=positive_int, default=defaults.model.required_gpu_count
+    )
+    parser.add_argument(
+        "--max-seq-length",
+        type=positive_int,
+        default=defaults.model.max_seq_length,
+    )
+    parser.add_argument(
+        "--per-device-batch-size",
+        type=positive_int,
+        default=defaults.training.per_device_train_batch_size,
+    )
+    parser.add_argument(
+        "--gradient-accumulation-steps",
+        type=positive_int,
+        default=defaults.training.gradient_accumulation_steps,
     )
     parser.add_argument(
         "--output-dir", type=Path, default=Path("outputs/sft/checkpoints")
@@ -73,6 +94,8 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
             model_name=args.model,
             max_seq_length=args.max_seq_length,
             require_a100=not args.allow_non_a100,
+            required_gpu_count=args.gpu_count,
+            require_distributed_launch=args.gpu_count > 1,
         ),
         data=replace(
             config.data, repository=args.dataset, subset=args.dataset_config
@@ -80,6 +103,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         training=replace(
             config.training,
             max_steps=args.max_steps,
+            eval_steps=args.eval_steps,
             per_device_train_batch_size=args.per_device_batch_size,
             gradient_accumulation_steps=args.gradient_accumulation_steps,
             output_dir=args.output_dir,

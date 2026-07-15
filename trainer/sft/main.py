@@ -114,7 +114,11 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
     total_stages = 11
     wandb_run: Any | None = None
     try:
-        _stage(1, total_stages, "Validate 2x A100 80GB DDP environment")
+        _stage(
+            1,
+            total_stages,
+            f"Validate {config.model.required_gpu_count}x A100 80GB environment",
+        )
         validate_hardware(config.model)
 
         _stage(2, total_stages, "Start Weights & Biases run")
@@ -225,4 +229,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

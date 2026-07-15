@@ -33,8 +33,8 @@ for index in range(torch.cuda.device_count()):
     properties = torch.cuda.get_device_properties(index)
     gib = properties.total_memory / 1024**3
     print(f"GPU {index}: {properties.name}, {gib:.2f} GiB")
-if torch.cuda.device_count() < 2:
-    raise SystemExit("The SFT profile requires two visible GPUs.")
+if torch.cuda.device_count() < 1:
+    raise SystemExit("The SFT profile requires one visible GPU.")
 PY
 
 echo
