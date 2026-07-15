@@ -32,9 +32,7 @@ uv pip install --upgrade --no-deps "tokenizers>=0.22.0,<=0.23.0" "trl==0.22.2" u
 uv pip install "transformers==5.2.0"
 uv pip install --no-build-isolation flash-linear-attention "causal_conv1d==1.6.0"
 uv pip install --no-deps "apache-tvm-ffi==0.1.9" "tilelang==0.1.8" "torchao>=0.16.0"
-# hf_xet is the native transport for Xet-backed repos like Qwen3.5-4B; without
-# it huggingface_hub warns and falls back to plain HTTP through the xet-bridge.
-uv pip install datasets wandb numpy tqdm peft hf_xet
+uv pip install datasets wandb numpy tqdm peft
 uv pip install -e .
 
 python - <<'PY'

@@ -162,8 +162,19 @@ no pre-quantized 4-bit repo for this model, so the full bf16 checkpoint is
 downloaded once and quantized at load time. It runs on a throwaway uv
 environment, so it works before the GPU stack exists.
 
-Keeping the transfer in its own step means it shows real progress bars, instead
-of hiding behind the silent Unsloth import at stage 3 of a training run.
+Every 15 seconds it reports the bytes actually on disk:
+
+~~~text
+   0.46 / 9.34 GB (  4.9%) at   6.1 MB/s, ~24 min left
+~~~
+
+That line is measured from the cache directory rather than taken from a progress
+bar, so it keeps moving in a logged or piped run where a redrawing bar would
+look frozen. If it stops advancing, the transfer really is stuck.
+
+The script forces `HF_HUB_DISABLE_XET=1`. The Xet transport stalled part-way
+through this repo, measured slower than plain HTTP, and emitted no progress of
+its own — the combination is what made the download look hung.
 
 ## 5. Install the GPU environment
 
