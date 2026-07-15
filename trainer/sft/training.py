@@ -44,8 +44,7 @@ def build_trainer(
             lr_scheduler_type="linear",
             seed=config.seed,
             output_dir=str(config.output_dir),
-            report_to=config.report
-            _to,
+            report_to=config.report_to,
             max_length=max_length,
             packing=False,
             bf16=True,
