@@ -5,6 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
+VENV_DIR="${REPO_ROOT}/.venv"
+SETUP_MARKER="${VENV_DIR}/.runpod-setup.sha256"
+SETUP_HASH="$(sha256sum "${SCRIPT_DIR}/setup_runpod.sh" | cut -d ' ' -f 1)"
+
 # The 4-bit warm load below reads the cache download_model.sh wrote. Without the
 # same HF_HOME it would silently re-download ~9.3 GB onto the container disk.
 if [[ -z "${HF_HOME:-}" ]]; then
@@ -16,13 +20,32 @@ if [[ -z "${HF_HOME:-}" ]]; then
   exit 1
 fi
 
+if [[ -x "${VENV_DIR}/bin/python" ]]; then
+  echo "Reusing the existing virtual environment at ${VENV_DIR}."
+
+  if [[ -f "${SETUP_MARKER}" ]] && [[ "$(<"${SETUP_MARKER}")" == "${SETUP_HASH}" ]]; then
+    source "${VENV_DIR}/bin/activate"
+    echo "RunPod SFT environment is already up to date."
+    echo "Activate it with: source ${VENV_DIR}/bin/activate"
+    echo "Then run: cd ${SCRIPT_DIR} && python main.py"
+    exit 0
+  fi
+elif [[ -e "${VENV_DIR}" ]]; then
+  echo "${VENV_DIR} exists but is not a valid virtual environment." >&2
+  echo "Move or remove it, then run this script again." >&2
+  exit 1
+fi
+
 if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="${HOME}/.local/bin:${PATH}"
 fi
 
-uv venv --python 3.12 .venv
-source .venv/bin/activate
+if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
+  uv venv --python 3.12 "${VENV_DIR}"
+fi
+
+source "${VENV_DIR}/bin/activate"
 
 # Match the versions validated by the source notebook.
 uv pip install "torch==2.8.0" "triton>=3.3.0" torchvision bitsandbytes "xformers==0.0.32.post2"
@@ -65,7 +88,9 @@ model, tokenizer = load_base_model(config)
 print(f"Model loaded in 4-bit in {(time.monotonic() - start) / 60:.1f} min.")
 PY
 
+printf '%s\n' "${SETUP_HASH}" > "${SETUP_MARKER}"
+
 echo
 echo "RunPod SFT environment is ready."
-echo "Activate it with: source ${REPO_ROOT}/.venv/bin/activate"
-echo "Then run: cd ${REPO_ROOT}/trainer/sft && python main.py"
+echo "Activate it with: source ${VENV_DIR}/bin/activate"
+echo "Then run: cd ${SCRIPT_DIR} && python main.py"
