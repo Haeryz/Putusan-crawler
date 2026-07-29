@@ -1,4 +1,4 @@
-"""Typed configuration for the per-section SFT workflow."""
+"""Typed configuration for the whole-document SFT workflow."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ class DataConfig:
     """Dataset and sequence-length measurement settings."""
 
     repository: str = "Haeryz/putusan-structured-extraction"
-    subset: str = "sft_sections"
+    subset: str = "sft"
     train_split: str = "train"
     validation_split: str = "validation"
     test_split: str = "test"

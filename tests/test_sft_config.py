@@ -19,7 +19,7 @@ def test_short_single_a100_experiment_defaults_are_explicit() -> None:
     assert config.model.required_gpu_count == 1
     assert config.model.require_distributed_launch is False
     assert config.model.minimum_vram_gb == 78.0
-    assert config.data.subset == "sft_sections"
+    assert config.data.subset == "sft"
     assert config.training.max_steps == 30
     assert config.training.eval_steps == 10
     assert config.training.per_device_train_batch_size == 1
@@ -56,6 +56,7 @@ def test_cli_accepts_training_overrides() -> None:
     assert args.per_device_batch_size == 1
     assert args.gradient_accumulation_steps == 4
     assert args.allow_non_a100 is True
+    assert args.dataset_config == "sft"
     assert args.wandb_project == "court-extractor"
     assert args.wandb_artifact_name == "stage-1-lora"
 

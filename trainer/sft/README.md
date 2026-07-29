@@ -1,8 +1,8 @@
-# Qwen 3.5 per-section SFT
+# Qwen 3.5 whole-document SFT
 
 This package is the maintainable Python version of
 `notebooks/Qwen3_5_(4B)(1)fsadfhasdkfd (1).ipynb`. It trains a language-only
-`Qwen/Qwen3.5-4B` extractor on the `sft_sections` dataset with 4-bit QLoRA
+`Qwen/Qwen3.5-4B` extractor on the Hugging Face `sft` config with 4-bit QLoRA
 and response-only supervision. Its default performance profile targets two
 A100 80GB GPUs on one node.
 
@@ -45,7 +45,7 @@ Useful overrides:
 uv run python trainer/sft/main.py `
   --model Qwen/Qwen3.5-4B `
   --dataset Haeryz/putusan-structured-extraction `
-  --dataset-config sft_sections `
+  --dataset-config sft `
   --max-seq-length 49152 `
   --per-device-batch-size 2 `
   --gradient-accumulation-steps 2 `

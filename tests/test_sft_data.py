@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import sys
+from types import SimpleNamespace
+
 import pytest
 
+from trainer.sft.config import DataConfig
 from trainer.sft.data import (
     choose_max_length,
     format_messages,
+    load_splits,
     measure_token_lengths,
 )
 
@@ -20,6 +25,29 @@ class FakeTokenizer:
     def __call__(self, texts, *, add_special_tokens):
         assert add_special_tokens is False
         return {"input_ids": [text.split() for text in texts]}
+
+
+def test_load_splits_uses_hugging_face_sft_config(monkeypatch) -> None:
+    calls = []
+
+    def fake_load_dataset(repository, subset, *, split):
+        calls.append((repository, subset, split))
+        return [f"{split}-row"]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "datasets",
+        SimpleNamespace(load_dataset=fake_load_dataset),
+    )
+
+    train, validation = load_splits(DataConfig())
+
+    assert train == ["train-row"]
+    assert validation == ["validation-row"]
+    assert calls == [
+        ("Haeryz/putusan-structured-extraction", "sft", "train"),
+        ("Haeryz/putusan-structured-extraction", "sft", "validation"),
+    ]
 
 
 def test_format_messages_renders_each_conversation() -> None:
@@ -61,4 +89,3 @@ def test_choose_max_length_rounds_up_and_reports_coverage() -> None:
 def test_choose_max_length_rejects_context_cap_below_percentile() -> None:
     with pytest.raises(ValueError, match="exceeds context cap"):
         choose_max_length([100, 200, 300], context_cap=128, multiple=64)
-

@@ -24,13 +24,13 @@ def build_parser() -> argparse.ArgumentParser:
     # those defaults, so they must read from it rather than restate values.
     defaults = RunConfig()
     parser = argparse.ArgumentParser(
-        description="Fine-tune Qwen3.5-4B for per-section putusan extraction"
+        description="Fine-tune Qwen3.5-4B for whole-document putusan extraction"
     )
     parser.add_argument("--model", default="Qwen/Qwen3.5-4B")
     parser.add_argument(
         "--dataset", default="Haeryz/putusan-structured-extraction"
     )
-    parser.add_argument("--dataset-config", default="sft_sections")
+    parser.add_argument("--dataset-config", default=defaults.data.subset)
     parser.add_argument(
         "--max-steps", type=positive_int, default=defaults.training.max_steps
     )
