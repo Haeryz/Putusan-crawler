@@ -29,9 +29,9 @@ def build_trainer(
 
     FastLanguageModel.for_training(model)
     text_tokenizer = get_text_tokenizer(tokenizer_or_processor)
-    # These runs supervise assistant responses only. Keeping the tail prevents
-    # a long user document from cutting off the assistant marker and target.
-    text_tokenizer.truncation_side = "left"
+    # data.py has already middle-truncated long rows while retaining both chat
+    # markers. Right truncation is only a final safety net for boundary tokens.
+    text_tokenizer.truncation_side = "right"
     trainer = SFTTrainer(
         model=model,
         processing_class=text_tokenizer,

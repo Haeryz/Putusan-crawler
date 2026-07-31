@@ -82,6 +82,103 @@ def format_dataset(
     )
 
 
+def _encode_text(tokenizer: Any, text: str) -> list[int]:
+    encoded = tokenizer(text, add_special_tokens=False)["input_ids"]
+    return [int(token_id) for token_id in encoded]
+
+
+def _decode_tokens(tokenizer: Any, token_ids: Sequence[int]) -> str:
+    return tokenizer.decode(
+        list(token_ids),
+        skip_special_tokens=False,
+        clean_up_tokenization_spaces=False,
+    )
+
+
+def truncate_text_preserving_response(
+    text: str,
+    tokenizer_or_processor: Any,
+    model_config: ModelConfig,
+    max_length: int,
+) -> str:
+    """Middle-truncate a chat while retaining both masking markers and target."""
+
+    tokenizer = get_text_tokenizer(tokenizer_or_processor)
+    if len(_encode_text(tokenizer, text)) <= max_length:
+        return text
+
+    instruction_at = text.find(model_config.instruction_part)
+    response_at = text.rfind(model_config.response_part)
+    if instruction_at < 0 or response_at < 0 or response_at <= instruction_at:
+        raise ValueError(
+            f"Cannot safely truncate {model_config.profile_name} row because "
+            "its instruction or response marker is missing"
+        )
+
+    instruction_end = instruction_at + len(model_config.instruction_part)
+    prefix = text[:instruction_end]
+    prompt_body = text[instruction_end:response_at]
+    response = text[response_at:]
+    prefix_ids = _encode_text(tokenizer, prefix)
+    prompt_ids = _encode_text(tokenizer, prompt_body)
+    response_ids = _encode_text(tokenizer, response)
+
+    # Leave a small boundary-token margin because separately decoded pieces can
+    # tokenize a few tokens differently after concatenation.
+    token_budget = max(1, max_length - 32)
+    prompt_budget = token_budget - len(prefix_ids) - len(response_ids)
+    if prompt_budget >= 0:
+        head_count = prompt_budget // 3
+        tail_count = prompt_budget - head_count
+        kept_prompt = (
+            _decode_tokens(tokenizer, prompt_ids[:head_count])
+            + _decode_tokens(
+                tokenizer, prompt_ids[-tail_count:] if tail_count else []
+            )
+        )
+        truncated = prefix + kept_prompt + response
+    else:
+        # Extremely large targets are rare. Preserve both exact markers and the
+        # beginning of the supervised answer rather than returning an all--100 row.
+        response_payload = text[response_at + len(model_config.response_part) :]
+        marker_ids = _encode_text(tokenizer, model_config.response_part)
+        payload_budget = max(
+            0, token_budget - len(prefix_ids) - len(marker_ids)
+        )
+        payload_ids = _encode_text(tokenizer, response_payload)
+        truncated = (
+            prefix
+            + model_config.response_part
+            + _decode_tokens(tokenizer, payload_ids[:payload_budget])
+        )
+
+    if len(_encode_text(tokenizer, truncated)) > max_length:
+        raise RuntimeError("Marker-preserving truncation exceeded max_length")
+    return truncated
+
+
+def truncate_dataset_preserving_responses(
+    dataset: Any,
+    tokenizer_or_processor: Any,
+    model_config: ModelConfig,
+    max_length: int,
+) -> Any:
+    """Apply marker-preserving middle truncation to a formatted dataset."""
+
+    return dataset.map(
+        lambda examples: {
+            "text": [
+                truncate_text_preserving_response(
+                    text, tokenizer_or_processor, model_config, max_length
+                )
+                for text in examples["text"]
+            ]
+        },
+        batched=True,
+        desc="Preserving chat markers while truncating long rows",
+    )
+
+
 def measure_token_lengths(
     texts: Sequence[str], tokenizer: Any, batch_size: int = 256
 ) -> list[int]:

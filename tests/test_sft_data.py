@@ -11,6 +11,7 @@ from trainer.sft.data import (
     format_messages,
     load_splits,
     measure_token_lengths,
+    truncate_text_preserving_response,
 )
 
 
@@ -119,3 +120,44 @@ def test_choose_max_length_caps_and_reports_truncated_rows() -> None:
 
     assert profile.max_length == 128
     assert profile.coverage == pytest.approx(1 / 3)
+
+
+class CharacterTokenizer:
+    def __call__(self, text, *, add_special_tokens):
+        assert add_special_tokens is False
+        return {"input_ids": [ord(character) for character in text]}
+
+    def decode(self, token_ids, **kwargs):
+        return "".join(chr(token_id) for token_id in token_ids)
+
+
+def test_middle_truncation_preserves_markers_prompt_edges_and_response() -> None:
+    config = MODEL_PROFILES["qwen"]
+    text = (
+        config.instruction_part
+        + "BEGIN-"
+        + ("x" * 300)
+        + "-END"
+        + config.response_part
+        + "TARGET-ANSWER"
+    )
+
+    truncated = truncate_text_preserving_response(
+        text, CharacterTokenizer(), config, max_length=160
+    )
+
+    assert len(truncated) <= 160
+    assert config.instruction_part in truncated
+    assert config.response_part in truncated
+    assert "BEGIN-" in truncated
+    assert "-END" in truncated
+    assert truncated.endswith("TARGET-ANSWER")
+
+
+def test_short_marker_complete_text_is_not_modified() -> None:
+    config = MODEL_PROFILES["qwen"]
+    text = config.instruction_part + "source" + config.response_part + "answer"
+
+    assert truncate_text_preserving_response(
+        text, CharacterTokenizer(), config, max_length=100
+    ) == text

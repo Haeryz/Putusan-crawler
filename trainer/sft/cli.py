@@ -58,8 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Fine-tune one supported model for putusan extraction. By default "
             "all CUDA GPUs visible inside the machine are used. Effective batch "
             "= per-device batch x GPU count x gradient accumulation. Oversized "
-            "conversations are automatically left-truncated to the context limit "
-            "to preserve the assistant response tail."
+            "conversations are automatically middle-truncated to the context "
+            "limit while preserving chat markers and the assistant response."
         ),
         formatter_class=HelpFormatter,
         epilog=(
@@ -147,7 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Override the 49,152-token context limit; oversized conversations "
-            "are automatically left-truncated"
+            "are automatically middle-truncated with chat markers preserved"
         ),
     )
     parser.add_argument(

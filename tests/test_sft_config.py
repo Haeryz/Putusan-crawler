@@ -49,7 +49,7 @@ def test_cli_help_documents_gpu_auto_detection_and_batch_formula() -> None:
     assert "[--modelname" in help_text
     assert "all CUDA GPUs visible" in help_text
     assert "Effective batch" in help_text
-    assert "automatically left-truncated" in help_text
+    assert "automatically middle-truncated" in help_text
     assert "--half-epoch" in help_text
     assert "Override auto-detection" in help_text
     assert "python -m trainer.sft.run_all" in help_text
@@ -219,7 +219,7 @@ def test_trainer_saves_resumable_state_every_configured_steps(
     assert sft_config["num_train_epochs"] == 1.0
     assert sft_config["max_steps"] == -1
     assert sft_config["max_length"] == 256
-    assert captured["trainer_kwargs"]["processing_class"].truncation_side == "left"
+    assert captured["trainer_kwargs"]["processing_class"].truncation_side == "right"
 
 
 def test_supported_model_profiles_match_hub_architectures_and_modalities() -> None:

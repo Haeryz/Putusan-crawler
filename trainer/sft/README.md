@@ -97,9 +97,10 @@ model, saves its LoRA under `outputs/sft/<model-slug>/lora/`, waits for the
 `<model-slug>-lora:latest` W&B upload, and exits without merging.
 
 Formatted conversations are capped at the profile's 49,152-token context.
-Oversized rows are truncated from the left so response-only training preserves
-the assistant answer at the end; context coverage is reported but does not stop
-the run.
+Oversized rows are truncated from the middle of the user content. This keeps
+the instruction marker, the end of the source document, the assistant marker,
+and the supervised answer so Unsloth can retain the row for response-only
+training. Context coverage is reported but does not stop the run.
 
 Typical unattended run:
 

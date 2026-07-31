@@ -222,8 +222,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(
                 f"WARNING: {model_key} p{config.data.length_percentile}="
                 f"{profile.p95} exceeds the configured context cap "
-                f"{model_config.max_seq_length}; training will left-truncate "
-                f"the longest {1 - profile.coverage:.2%} of rows.",
+                f"{model_config.max_seq_length}; training will middle-truncate "
+                f"the user content in the longest "
+                f"{1 - profile.coverage:.2%} of rows.",
                 flush=True,
             )
         run = wandb.init(

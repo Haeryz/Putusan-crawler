@@ -32,6 +32,7 @@ if __package__ in {None, ""}:
         load_cached_lengths,
         load_or_measure_lengths,
         load_splits,
+        truncate_dataset_preserving_responses,
     )
     from trainer.sft.tracking import (
         checkpoint_upload_callback,
@@ -59,6 +60,7 @@ else:
         load_cached_lengths,
         load_or_measure_lengths,
         load_splits,
+        truncate_dataset_preserving_responses,
     )
     from .tracking import (
         checkpoint_upload_callback,
@@ -314,6 +316,12 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
             config,
             training=replace(config.training, eval_steps=eval_steps),
         )
+        train_dataset = truncate_dataset_preserving_responses(
+            train_dataset, tokenizer, config.model, profile.max_length
+        )
+        eval_dataset = truncate_dataset_preserving_responses(
+            eval_dataset, tokenizer, config.model, profile.max_length
+        )
         if _is_rank_zero():
             print(
                 f"Context: p50={profile.p50}, p90={profile.p90}, "
@@ -321,7 +329,8 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
                 f"selected={profile.max_length}, coverage={profile.coverage:.2%}"
             )
             print(
-                "Truncation: left-side, response-preserving; "
+                "Truncation: middle of user content, preserving instruction "
+                "and response markers; "
                 f"{1 - profile.coverage:.2%} of training rows exceed the "
                 f"{profile.max_length}-token limit"
             )
@@ -357,7 +366,7 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
             "dataset": config.data.repository,
             "dataset_config": config.data.subset,
             "max_length": profile.max_length,
-            "truncation_side": "left",
+            "truncation_strategy": "middle-preserve-chat-markers-and-response",
             "fraction_rows_truncated": 1 - profile.coverage,
             "effective_batch_size": config.training.effective_batch_size(
                 world_size

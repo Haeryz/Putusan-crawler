@@ -154,6 +154,11 @@ def test_complete_workflow_runs_modules_in_order_and_uploads(
         "choose_max_length",
         lambda *args: events.append("choose_context") or profile,
     )
+    monkeypatch.setattr(
+        workflow,
+        "truncate_dataset_preserving_responses",
+        lambda dataset, *args: events.append("truncate") or dataset,
+    )
     monkeypatch.setattr(workflow, "distributed_world_size", lambda: 2)
     monkeypatch.setattr(
         workflow,
@@ -206,6 +211,8 @@ def test_complete_workflow_runs_modules_in_order_and_uploads(
         "format",
         "lengths",
         "choose_context",
+        "truncate",
+        "truncate",
         "build_trainer",
         "build_checkpoint_callback",
         "add_checkpoint_callback",
