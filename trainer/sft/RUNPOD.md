@@ -39,6 +39,20 @@ Setup installs the compatible GPU stack and ends with:
 python -m trainer.sft.preflight --deep
 ```
 
+### Python 3.12 `llvmlite==0.36.0` setup failure
+
+Pull the latest `master` and rerun setup:
+
+```bash
+git pull origin master
+bash trainer/sft/setup_runpod.sh
+```
+
+The SFT workflow is text-only, so setup intentionally omits the optional
+`librosa -> numba -> llvmlite` audio dependency chain. A failed setup does not
+write its completion marker; rerunning safely reuses the partially created
+`.venv` and completes the remaining installation.
+
 That test validates package versions, credentials, access to all model repos,
 the real dataset schema, chat-template response markers, W&B authentication,
 GPU availability, 4-bit loading, LoRA placement, frozen multimodal towers,

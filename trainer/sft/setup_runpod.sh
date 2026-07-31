@@ -62,7 +62,10 @@ uv pip install --upgrade --no-deps "tokenizers>=0.22.0,<=0.23.0" "unsloth>=2026.
 uv pip install "transformers>=5.5.0,<5.6" "trl>=0.28.0,<0.29" "huggingface_hub>=1.5.0" "datasets==4.3.0"
 uv pip install --no-build-isolation flash-linear-attention "causal_conv1d==1.6.0"
 uv pip install --no-deps "apache-tvm-ffi==0.1.9" "tilelang==0.1.8" "torchao>=0.16.0"
-uv pip install wandb numpy tqdm peft accelerate sentencepiece protobuf timm librosa packaging
+# Training is text-only for every profile. Do not install librosa: its optional
+# numba/llvmlite audio stack can select Python-incompatible legacy releases on
+# Python 3.12 RunPod images, and no SFT code path consumes audio.
+uv pip install wandb numpy tqdm peft accelerate sentencepiece protobuf timm packaging
 uv pip install -e .
 
 python - <<'PY'
