@@ -169,7 +169,7 @@ def test_trainer_saves_resumable_state_every_configured_steps(
 
 
 def test_supported_model_profiles_match_hub_architectures_and_modalities() -> None:
-    assert MODEL_ORDER == ("qwen", "gemma", "llama")
+    assert MODEL_ORDER == ("qwen", "gemma", "deepseek")
     assert MODEL_PROFILES["qwen"].input_modalities == (
         "text", "image", "video"
     )
@@ -179,9 +179,13 @@ def test_supported_model_profiles_match_hub_architectures_and_modalities() -> No
     assert gemma.lora_kind == "multimodal_language_only"
     assert "vision_tower" in gemma.non_text_module_fragments
     assert "audio_tower" in gemma.non_text_module_fragments
-    llama = model_config_for("meta-llama/Llama-3.2-3B-Instruct")
-    assert llama.architecture == "LlamaForCausalLM"
-    assert llama.input_modalities == ("text",)
+    deepseek = model_config_for(
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+    )
+    assert deepseek.architecture == "Qwen2ForCausalLM"
+    assert deepseek.input_modalities == ("text",)
+    assert deepseek.instruction_part == "<｜User｜>"
+    assert deepseek.response_part == "<｜Assistant｜>"
 
 
 def test_each_model_uses_isolated_local_and_wandb_names() -> None:

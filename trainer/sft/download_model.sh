@@ -29,8 +29,8 @@ if [[ -z "${HF_HOME:-}" ]]; then
 fi
 
 if [[ -z "${HF_TOKEN:-}" ]]; then
-  echo "HF_TOKEN is not set. The model downloads require an authenticated"
-  echo "Hugging Face account; Llama also requires gated-repository access."
+  echo "HF_TOKEN is not set. The model downloads require a Hugging Face"
+  echo "access token."
   echo
   echo "Copy trainer/sft/.env.example to trainer/sft/.env and replace the"
   echo "placeholder with a Hugging Face access token."

@@ -4,7 +4,7 @@ This package fine-tunes three Hugging Face models in this fixed order:
 
 1. `Qwen/Qwen3.5-4B`
 2. `google/gemma-4-E2B-it`
-3. `meta-llama/Llama-3.2-3B-Instruct`
+3. `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B`
 
 One command runs a deep preflight and then launches each model in a fresh
 Python process:
@@ -27,7 +27,7 @@ three Hugging Face repositories.
 | --- | --- | --- |
 | Qwen 3.5 | text, image/video vision encoder | `text_only=True`; vision excluded from LoRA |
 | Gemma 4 | text, image/video vision encoder, audio encoder | language attention/MLP LoRA only; vision, audio, and multimodal projectors frozen |
-| Llama 3.2 3B | text only | language LoRA |
+| DeepSeek R1 Distill Qwen 1.5B | text only | language LoRA |
 
 The dataset formatter rejects list-based image/audio content. After LoRA is
 attached, the workflow scans trainable parameter names and aborts if a Qwen
@@ -66,7 +66,6 @@ The all-model runner uses the deep check by default. Use
 `--quick-preflight` only when weights were already validated, or
 `--skip-preflight` when deliberately resuming without repeating it.
 
-Llama is gated. The account owning `HF_TOKEN` must have accepted its license.
 Keep `HF_HOME` on persistent RunPod storage.
 
 ## Running
@@ -89,7 +88,7 @@ Run only one profile when debugging:
 python -m trainer.sft --model gemma
 ```
 
-Accepted profile names are `qwen`, `gemma`, and `llama`; their exact Hub
+Accepted profile names are `qwen`, `gemma`, and `deepseek`; their exact Hub
 repository names are accepted too. `--allow-non-a100` keeps CUDA mandatory but
 disables the A100 name/VRAM guard.
 
@@ -115,7 +114,7 @@ operation in `checkpoint.py`.
 | --- | --- |
 | `config.py` | Three architecture/modality profiles and isolated paths |
 | `preflight.py` | Fail-fast environment and real-model smoke test |
-| `run_all.py` | Qwen → Gemma → Llama process orchestration |
+| `run_all.py` | Qwen → Gemma → DeepSeek process orchestration |
 | `transformer.py` | Unsloth loaders, language LoRA, frozen-tower checks |
 | `data.py` | Text-only chat formatting and per-tokenizer context sizing |
 | `training.py` | TRL trainer and profile-specific response masking |

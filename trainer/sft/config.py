@@ -41,11 +41,11 @@ class ModelConfig:
         return {
             "qwen": "qwen3-5-4b",
             "gemma": "gemma-4-e2b",
-            "llama": "llama-3-2-3b",
+            "deepseek": "deepseek-r1-distill-qwen-1-5b",
         }[self.profile_name]
 
 
-MODEL_ORDER: tuple[str, ...] = ("qwen", "gemma", "llama")
+MODEL_ORDER: tuple[str, ...] = ("qwen", "gemma", "deepseek")
 
 MODEL_PROFILES: dict[str, ModelConfig] = {
     "qwen": ModelConfig(),
@@ -68,17 +68,13 @@ MODEL_PROFILES: dict[str, ModelConfig] = {
             "multimodal_projector",
         ),
     ),
-    "llama": ModelConfig(
-        profile_name="llama",
-        model_name="meta-llama/Llama-3.2-3B-Instruct",
-        architecture="LlamaForCausalLM",
+    "deepseek": ModelConfig(
+        profile_name="deepseek",
+        model_name="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+        architecture="Qwen2ForCausalLM",
         input_modalities=("text",),
-        instruction_part=(
-            "<|start_header_id|>user<|end_header_id|>\n\n"
-        ),
-        response_part=(
-            "<|start_header_id|>assistant<|end_header_id|>\n\n"
-        ),
+        instruction_part="<｜User｜>",
+        response_part="<｜Assistant｜>",
         require_linear_attention_lora=False,
         require_tiled_mlp=False,
         non_text_module_fragments=(),

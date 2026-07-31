@@ -1,4 +1,4 @@
-"""Run Qwen, Gemma, then Llama SFT as isolated child processes."""
+"""Run Qwen, Gemma, then DeepSeek SFT as isolated child processes."""
 
 from __future__ import annotations
 

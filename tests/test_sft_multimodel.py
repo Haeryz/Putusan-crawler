@@ -37,7 +37,7 @@ def runner_args(**overrides) -> Namespace:
 def test_sequential_commands_select_each_profile_and_unique_run_name() -> None:
     commands = {
         key: build_training_command(key, runner_args())
-        for key in ("qwen", "gemma", "llama")
+        for key in ("qwen", "gemma", "deepseek")
     }
 
     for key, command in commands.items():
@@ -46,7 +46,10 @@ def test_sequential_commands_select_each_profile_and_unique_run_name() -> None:
         assert "--max-steps" not in command
     assert commands["qwen"][-1] == "trial-qwen3-5-4b"
     assert commands["gemma"][-1] == "trial-gemma-4-e2b"
-    assert commands["llama"][-1] == "trial-llama-3-2-3b"
+    assert (
+        commands["deepseek"][-1]
+        == "trial-deepseek-r1-distill-qwen-1-5b"
+    )
 
 
 def test_hub_config_modality_inference_distinguishes_three_architectures() -> None:
@@ -56,7 +59,7 @@ def test_hub_config_modality_inference_distinguishes_three_architectures() -> No
     assert infer_modalities(
         {"text_config": {}, "vision_config": {}, "audio_config": {}}
     ) == {"text", "image", "audio", "video"}
-    assert infer_modalities({"model_type": "llama"}) == {"text"}
+    assert infer_modalities({"model_type": "qwen2"}) == {"text"}
 
 
 def test_gemma_non_text_trainable_parameter_is_rejected() -> None:

@@ -23,9 +23,6 @@ WANDB_API_KEY=...
 HF_HOME=/workspace/.cache/huggingface
 ```
 
-The Hugging Face account must have access to the gated
-`meta-llama/Llama-3.2-3B-Instruct` repository.
-
 ## Download and validate
 
 ```bash
@@ -34,7 +31,8 @@ bash trainer/sft/setup_runpod.sh
 source .venv/bin/activate
 ```
 
-The downloader caches Qwen 3.5 4B, Gemma 4 E2B IT, and Llama 3.2 3B Instruct.
+The downloader caches Qwen 3.5 4B, Gemma 4 E2B IT, and DeepSeek R1 Distill
+Qwen 1.5B.
 Setup installs the compatible GPU stack and ends with:
 
 ```bash
@@ -68,7 +66,7 @@ tmux attach -t putusan-sft
 ```
 
 The runner performs the deep preflight again by default, then starts Qwen,
-Gemma, and Llama in isolated processes. If a model fails, the command exits
+Gemma, and DeepSeek in isolated processes. If a model fails, the command exits
 immediately and does not start later models. Fix the problem and rerun.
 
 At startup, each model scans every version in its own W&B checkpoint
