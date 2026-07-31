@@ -8,7 +8,8 @@ import subprocess
 import sys
 from typing import Sequence
 
-from .config import MODEL_ORDER, MODEL_PROFILES
+from .config import MODEL_ORDER, MODEL_PROFILES, TrackingConfig
+from .cli import HelpFormatter, positive_float, positive_int, resolve_gpu_count
 
 
 def build_training_command(
@@ -29,8 +30,6 @@ def build_training_command(
         args.dataset_config,
         "--num-train-epochs",
         str(args.num_train_epochs),
-        "--eval-steps",
-        str(args.eval_steps),
         "--save-steps",
         str(args.save_steps),
         "--gpu-count",
@@ -50,6 +49,12 @@ def build_training_command(
     ]
     if args.max_steps is not None:
         command.extend(("--max-steps", str(args.max_steps)))
+    if args.evaluations_per_epoch is not None:
+        command.extend(
+            ("--evaluations-per-epoch", str(args.evaluations_per_epoch))
+        )
+    elif args.eval_steps is not None:
+        command.extend(("--eval-steps", str(args.eval_steps)))
     if args.wandb_entity:
         command.extend(("--wandb-entity", args.wandb_entity))
     if args.allow_non_a100:
@@ -62,7 +67,19 @@ def build_training_command(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run Qwen, Gemma, then DeepSeek SFT sequentially. By default every "
+            "CUDA GPU visible inside the machine is used for each model."
+        ),
+        formatter_class=HelpFormatter,
+        epilog=(
+            "example:\n"
+            "  python -m trainer.sft.run_all --dataset-config sft_sections\n\n"
+            "For single-model options:\n"
+            "  python -m trainer.sft --help"
+        ),
+    )
     parser.add_argument(
         "--skip-preflight",
         action="store_true",
@@ -74,31 +91,79 @@ def build_parser() -> argparse.ArgumentParser:
         help="Check metadata and services without loading model weights",
     )
     parser.add_argument(
-        "--dataset", default="Haeryz/putusan-structured-extraction"
+        "--dataset", default="Haeryz/putusan-structured-extraction",
+        help="Hugging Face dataset repository passed to every model",
     )
-    parser.add_argument("--dataset-config", default="sft")
-    parser.add_argument("--num-train-epochs", type=float, default=1.0)
+    parser.add_argument(
+        "--dataset-config", default="sft",
+        help="Dataset subset/config, such as sft or sft_sections",
+    )
+    parser.add_argument(
+        "--num-train-epochs", type=positive_float, default=1.0,
+        help="Number of complete passes for each model",
+    )
     parser.add_argument(
         "--max-steps",
-        type=int,
+        type=positive_int,
         help="Optional step limit for smoke/debug runs",
     )
-    parser.add_argument("--eval-steps", type=int, default=10)
-    parser.add_argument("--save-steps", type=int, default=5)
-    parser.add_argument("--gpu-count", type=int, default=1)
-    parser.add_argument("--per-device-batch-size", type=int, default=1)
-    parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
-    parser.add_argument("--allow-non-a100", action="store_true")
-    parser.add_argument("--wandb-project", default="putusan-sft")
-    parser.add_argument("--wandb-entity")
-    parser.add_argument("--wandb-run-prefix")
-    parser.add_argument("--no-wandb-upload", action="store_true")
-    parser.add_argument("--no-wandb-resume", action="store_true")
+    parser.add_argument(
+        "--eval-steps", type=positive_int, default=38,
+        help="Explicitly run validation every N optimizer steps",
+    )
+    parser.add_argument(
+        "--evaluations-per-epoch", type=positive_int, default=None,
+        help="Use automatic cadence instead of the fixed --eval-steps interval",
+    )
+    parser.add_argument(
+        "--save-steps", type=positive_int, default=50,
+        help="Save a checkpoint every N optimizer steps",
+    )
+    parser.add_argument(
+        "--gpu-count", type=positive_int, default=None,
+        help="Override auto-detection and use exactly N visible GPUs",
+    )
+    parser.add_argument(
+        "--per-device-batch-size", type=positive_int, default=1,
+        help="Micro-batch size processed by each GPU",
+    )
+    parser.add_argument(
+        "--gradient-accumulation-steps", type=positive_int, default=8,
+        help="Micro-batches accumulated before each optimizer update",
+    )
+    parser.add_argument(
+        "--allow-non-a100", action="store_true",
+        help="Skip the A100 name/VRAM guard (CUDA remains required)",
+    )
+    parser.add_argument(
+        "--wandb-project",
+        default=TrackingConfig().project,
+        help="W&B project name",
+    )
+    parser.add_argument("--wandb-entity", help="Optional W&B team/entity")
+    parser.add_argument(
+        "--wandb-run-prefix", help="Prefix for profile-specific W&B run names"
+    )
+    parser.add_argument(
+        "--no-wandb-upload", action="store_true",
+        help="Track metrics without uploading checkpoints or final adapters",
+    )
+    parser.add_argument(
+        "--no-wandb-resume", action="store_true",
+        help="Do not scan W&B for a newer resumable checkpoint",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.gpu_count is None:
+        args.gpu_count = resolve_gpu_count(None)
+        print(
+            f"Auto-detected {args.gpu_count} visible CUDA GPU(s); using all for "
+            "each model. Pass --gpu-count N to override.",
+            flush=True,
+        )
     child_environment = os.environ.copy()
     for variable in ("RANK", "LOCAL_RANK", "WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT"):
         child_environment.pop(variable, None)

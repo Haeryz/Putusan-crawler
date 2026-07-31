@@ -18,12 +18,13 @@ def runner_args(**overrides) -> Namespace:
         "dataset_config": "sft",
         "num_train_epochs": 1.0,
         "max_steps": None,
-        "eval_steps": 10,
+        "eval_steps": 38,
+        "evaluations_per_epoch": None,
         "save_steps": 5,
         "gpu_count": 1,
         "per_device_batch_size": 1,
         "gradient_accumulation_steps": 8,
-        "wandb_project": "putusan-sft",
+        "wandb_project": "Sinergi-training",
         "wandb_entity": None,
         "wandb_run_prefix": "trial",
         "allow_non_a100": False,
@@ -44,10 +45,16 @@ def test_sequential_commands_select_each_profile_and_unique_run_name() -> None:
         assert command[command.index("--model") + 1] == key
         assert command[command.index("--num-train-epochs") + 1] == "1.0"
         assert "--max-steps" not in command
-    assert commands["qwen"][-1] == "trial-qwen3-5-4b"
-    assert commands["gemma"][-1] == "trial-gemma-4-e2b"
+    assert commands["qwen"][commands["qwen"].index("--wandb-run-name") + 1] == (
+        "trial-qwen3-5-4b"
+    )
+    assert commands["gemma"][commands["gemma"].index("--wandb-run-name") + 1] == (
+        "trial-gemma-4-e2b"
+    )
     assert (
-        commands["deepseek"][-1]
+        commands["deepseek"][
+            commands["deepseek"].index("--wandb-run-name") + 1
+        ]
         == "trial-deepseek-r1-distill-qwen-1-5b"
     )
 

@@ -70,17 +70,40 @@ Keep `HF_HOME` on persistent RunPod storage.
 
 ## Running
 
+Run one model from environment validation through a complete epoch, local LoRA
+save, and confirmed W&B adapter upload (no merge):
+
+```bash
+python trainer/sft/main.py --modelname qwen
+python trainer/sft/main.py --modelname gemma
+python trainer/sft/main.py --modelname deepseek
+```
+
+The equivalent package form is
+`python -m trainer.sft --modelname <qwen|gemma|deepseek>`. The command loads
+`trainer/sft/.env`, auto-detects and uses all visible GPUs, restores the
+matching cache/checkpoint from `Sinergi-training`, trains only the selected
+model, saves its LoRA under `outputs/sft/<model-slug>/lora/`, waits for the
+`<model-slug>-lora:latest` W&B upload, and exits without merging.
+
+Formatted conversations are capped at the profile's 49,152-token context.
+Oversized rows are truncated from the left so response-only training preserves
+the assistant answer at the end; context coverage is reported but does not stop
+the run.
+
 Typical unattended run:
 
 ```bash
 python -m trainer.sft.run_all \
-  --save-steps 5 \
-  --wandb-project putusan-sft \
+  --wandb-project Sinergi-training \
   --wandb-run-prefix production
 ```
 
 The default is one complete training epoch. `--max-steps N` is only an
 explicit smoke/debug override and takes precedence over the epoch count.
+The production defaults evaluate every 38 optimizer steps and save/upload a
+resumable checkpoint every 50 steps. Pass `--evaluations-per-epoch K` to
+replace the fixed evaluation interval with an automatically calculated one.
 
 Run only one profile when debugging:
 
@@ -88,9 +111,53 @@ Run only one profile when debugging:
 python -m trainer.sft --model gemma
 ```
 
+Both entry points auto-detect and use every CUDA GPU visible inside the running
+machine. RunPod marketplace availability is not visible to the process: if the
+pod is assigned two GPUs, the job uses two; if it is assigned three, the job
+uses three. Use `--gpu-count N` to select fewer visible GPUs explicitly.
+
+List every option, its default, the effective-batch formula, and examples with:
+
+```bash
+python -m trainer.sft --help
+python -m trainer.sft.run_all --help
+```
+
 Accepted profile names are `qwen`, `gemma`, and `deepseek`; their exact Hub
 repository names are accepted too. `--allow-non-a100` keeps CUDA mandatory but
 disables the A100 name/VRAM guard.
+
+### Choosing evaluation frequency
+
+For `N` training rows, per-device batch `B`, `G` GPUs, and accumulation `A`,
+the optimizer steps per epoch are approximately `S = ceil(N / (B*G*A))`.
+For `K` validations per epoch, use `eval_steps = floor(S/K)`. The fixed
+production default is 38; optional `--evaluations-per-epoch 4` resolves as:
+
+| Dataset config | 2 GPUs | 3 GPUs |
+| --- | ---: | ---: |
+| `sft` | 155 steps/epoch, evaluate every 38 | 103, every 25 |
+| `sft_sections` | 923 steps/epoch, evaluate every 230 | 616, every 154 |
+
+To enforce a wall-time budget after measuring one training step (`t_step`) and
+one complete validation (`T_eval`), compute `T_train = S*t_step`. If validation
+may consume at most fraction `f` of total runtime, the largest affordable count
+is `floor(f*T_train / ((1-f)*T_eval))`.
+
+### Precomputing token lengths off-pod
+
+Token lengths depend on the model tokenizer and formatted dataset, so each
+profile has its own cache. They can be measured on a local CPU before renting
+the training pod; CUDA does not accelerate tokenizer work:
+
+```bash
+python -m trainer.sft.precompute_lengths
+```
+
+The command reads `HF_TOKEN` and `WANDB_API_KEY` from `trainer/sft/.env`,
+downloads only the dataset and tokenizer files, measures all three profiles,
+and uploads `<slug>-token-lengths:latest` to W&B. Training then downloads the
+matching cache during stage 8 and skips measurement.
 
 Every run automatically scans all versions of that model's configured W&B
 checkpoint collection. It filters by base model, dataset, and dataset config,
@@ -104,9 +171,35 @@ Use `--no-wandb-resume` only when intentionally starting from local state or
 from scratch. Every newly saved checkpoint is synchronously committed to W&B
 before training proceeds.
 
-The final local output is a LoRA adapter, not a merged base model and not an
-automatic Hugging Face upload. Merging/publishing remains an explicit later
-operation in `checkpoint.py`.
+## Outputs and later-session merging
+
+Training writes final LoRA adapters to these profile-specific directories:
+
+```text
+outputs/sft/qwen3-5-4b/lora/
+outputs/sft/gemma-4-e2b/lora/
+outputs/sft/deepseek-r1-distill-qwen-1-5b/lora/
+```
+
+It also waits for matching W&B model artifacts named `qwen3-5-4b-lora`,
+`gemma-4-e2b-lora`, and `deepseek-r1-distill-qwen-1-5b-lora`, each with the
+`latest` alias. Do not terminate the training pod until it prints
+`W&B artifact uploaded` for the last model.
+
+On a later pod, restore and merge one adapter with:
+
+```bash
+export WANDB_ENTITY="your-wandb-entity"
+python -m trainer.sft.merge --model qwen
+python -m trainer.sft.merge --model gemma
+python -m trainer.sft.merge --model deepseek
+```
+
+The command prefers a local LoRA directory and otherwise downloads its final
+artifact from W&B. Merged 16-bit model directories are written under
+`outputs/sft/<model-slug>/merged-16bit/`. These merged weights are local and
+large, so put `outputs/` on a persistent RunPod volume or upload each merged
+directory before terminating that pod.
 
 ## Modules
 
@@ -119,4 +212,5 @@ operation in `checkpoint.py`.
 | `data.py` | Text-only chat formatting and per-tokenizer context sizing |
 | `training.py` | TRL trainer and profile-specific response masking |
 | `checkpoint.py` | Atomic checkpoint restore, adapter save, and explicit merge/Hub export |
+| `merge.py` | Later-session W&B adapter restore and 16-bit merge command |
 | `tracking.py` | W&B checkpoint scan/restore lifecycle and artifact uploads |

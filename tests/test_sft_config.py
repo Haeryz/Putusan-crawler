@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from trainer.sft.cli import build_parser, config_from_args
+from trainer.sft.cli import build_parser, config_from_args, resolve_gpu_count
 from trainer.sft.config import (
     MODEL_ORDER,
     MODEL_PROFILES,
@@ -31,15 +31,37 @@ def test_short_single_a100_experiment_defaults_are_explicit() -> None:
     assert config.data.subset == "sft"
     assert config.training.num_train_epochs == 1.0
     assert config.training.max_steps == -1
-    assert config.training.eval_steps == 10
-    assert config.training.save_steps == 5
+    assert config.training.eval_steps == 38
+    assert config.training.evaluations_per_epoch == 4
+    assert config.training.save_steps == 50
     assert config.training.per_device_train_batch_size == 1
     assert config.training.gradient_accumulation_steps == 8
     assert config.training.effective_batch_size(world_size=1) == 8
-    assert config.tracking.project == "putusan-sft"
+    assert config.tracking.project == "Sinergi-training"
     assert config.tracking.upload_adapter is True
     assert config.tracking.upload_checkpoints is True
     assert config.tracking.restore_checkpoints is True
+
+
+def test_cli_help_documents_gpu_auto_detection_and_batch_formula() -> None:
+    help_text = build_parser().format_help()
+
+    assert "[--modelname" in help_text
+    assert "all CUDA GPUs visible" in help_text
+    assert "Effective batch" in help_text
+    assert "automatically left-truncated" in help_text
+    assert "Override auto-detection" in help_text
+    assert "python -m trainer.sft.run_all" in help_text
+
+
+def test_gpu_count_auto_detection_uses_all_visible_devices(monkeypatch) -> None:
+    fake_torch = SimpleNamespace(
+        cuda=SimpleNamespace(device_count=lambda: 3)
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    assert resolve_gpu_count(None) == 3
+    assert resolve_gpu_count(2) == 2
 
 
 def test_cli_accepts_training_overrides() -> None:
@@ -91,6 +113,19 @@ def test_cli_accepts_training_overrides() -> None:
     assert config.tracking.checkpoint_artifact_name == "stage-1-checkpoint"
     assert config.tracking.upload_adapter is True
     assert config.tracking.upload_checkpoints is True
+
+
+def test_modelname_alias_selects_one_full_training_profile() -> None:
+    args = build_parser().parse_args(["--modelname", "deepseek"])
+    config = config_from_args(args)
+
+    assert args.model == "deepseek"
+    assert config.model.model_name == (
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+    )
+    assert config.training.max_steps == -1
+    assert config.training.num_train_epochs == 1.0
+    assert config.tracking.upload_adapter is True
 
 
 def test_no_wandb_upload_disables_checkpoint_and_lora_artifacts() -> None:
@@ -151,11 +186,11 @@ def test_trainer_saves_resumable_state_every_configured_steps(
 
     build_trainer(
         object(),
-        object(),
+        SimpleNamespace(),
         [1],
         [2],
         max_length=256,
-        config=TrainingConfig(save_steps=5),
+        config=TrainingConfig(save_steps=5, eval_steps=10),
         model_config=ModelConfig(),
     )
 
@@ -166,6 +201,8 @@ def test_trainer_saves_resumable_state_every_configured_steps(
     assert sft_config["save_only_model"] is False
     assert sft_config["num_train_epochs"] == 1.0
     assert sft_config["max_steps"] == -1
+    assert sft_config["max_length"] == 256
+    assert captured["trainer_kwargs"]["processing_class"].truncation_side == "left"
 
 
 def test_supported_model_profiles_match_hub_architectures_and_modalities() -> None:
@@ -225,6 +262,17 @@ def test_two_worker_torchrun_environment_is_required_for_two_gpu_override() -> N
 def test_effective_batch_rejects_invalid_world_size() -> None:
     with pytest.raises(ValueError, match="positive"):
         RunConfig().training.effective_batch_size(0)
+
+
+def test_automatic_eval_interval_targets_four_evaluations_per_epoch() -> None:
+    training = TrainingConfig(eval_steps=None)
+
+    assert training.optimizer_steps_per_epoch(2_468, world_size=2) == 155
+    assert training.resolved_eval_steps(2_468, world_size=2) == 38
+    assert training.optimizer_steps_per_epoch(14_766, world_size=2) == 923
+    assert training.resolved_eval_steps(14_766, world_size=2) == 230
+    assert TrainingConfig().resolved_eval_steps(14_766, world_size=2) == 38
+    assert TrainingConfig(eval_steps=75).resolved_eval_steps(14_766, 2) == 75
 
 
 def test_hardware_profile_checks_single_default_gpu(

@@ -122,7 +122,7 @@ def choose_max_length(
     percentile: int = 95,
     multiple: int = 256,
 ) -> LengthProfile:
-    """Round the selected percentile upward without exceeding the model cap."""
+    """Round the selected percentile upward and cap oversized rows."""
 
     values = sorted(int(length) for length in lengths)
     if not values:
@@ -153,11 +153,6 @@ def choose_max_length(
         max_length=int(max_length),
         coverage=sum(value <= max_length for value in values) / len(values),
     )
-    if selected > max_length:
-        raise ValueError(
-            f"The {percentile}th percentile ({selected}) exceeds context cap "
-            f"{context_cap}"
-        )
     return profile
 
 

@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 from typing import Any, Sequence
+from dataclasses import replace
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -79,6 +80,36 @@ else:
 
 def _is_rank_zero() -> bool:
     return int(os.environ.get("RANK", "0")) == 0
+
+
+TRAINING_ENV_KEYS = {
+    "HF_TOKEN",
+    "HF_HOME",
+    "WANDB_API_KEY",
+    "WANDB_ENTITY",
+}
+
+
+def load_training_env(path: Path | None = None) -> set[str]:
+    """Load the SFT .env without overriding explicitly exported variables."""
+
+    env_path = path or Path(__file__).with_name(".env")
+    loaded: set[str] = set()
+    if not env_path.is_file():
+        return loaded
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key not in TRAINING_ENV_KEYS:
+            continue
+        value = value.strip().strip('"').strip("'")
+        if value and key not in os.environ:
+            os.environ[key] = value
+            loaded.add(key)
+    return loaded
 
 
 def _stage(number: int, total: int, message: str) -> None:
@@ -274,12 +305,15 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
             config.data.length_percentile,
             config.data.length_multiple,
         )
-        if profile.coverage < config.data.minimum_context_coverage:
-            raise RuntimeError(
-                f"Context coverage {profile.coverage:.2%} is below "
-                f"{config.data.minimum_context_coverage:.2%}"
-            )
         world_size = distributed_world_size()
+        automatic_eval_cadence = config.training.eval_steps is None
+        eval_steps = config.training.resolved_eval_steps(
+            len(train_dataset), world_size
+        )
+        config = replace(
+            config,
+            training=replace(config.training, eval_steps=eval_steps),
+        )
         if _is_rank_zero():
             print(
                 f"Context: p50={profile.p50}, p90={profile.p90}, "
@@ -287,11 +321,24 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
                 f"selected={profile.max_length}, coverage={profile.coverage:.2%}"
             )
             print(
+                "Truncation: left-side, response-preserving; "
+                f"{1 - profile.coverage:.2%} of training rows exceed the "
+                f"{profile.max_length}-token limit"
+            )
+            print(
                 "Batch: "
                 f"{config.training.per_device_train_batch_size}/GPU x "
                 f"{world_size} GPUs x "
                 f"{config.training.gradient_accumulation_steps} accumulation "
                 f"= {config.training.effective_batch_size(world_size)}"
+            )
+            print(
+                f"Evaluation: every {eval_steps} optimizer steps"
+                + (
+                    f" (target {config.training.evaluations_per_epoch}/epoch)"
+                    if automatic_eval_cadence
+                    else " (fixed interval)"
+                )
             )
 
         _stage(9, total_stages, "Build response-only SFT trainer")
@@ -310,6 +357,8 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
             "dataset": config.data.repository,
             "dataset_config": config.data.subset,
             "max_length": profile.max_length,
+            "truncation_side": "left",
+            "fraction_rows_truncated": 1 - profile.coverage,
             "effective_batch_size": config.training.effective_batch_size(
                 world_size
             ),
@@ -362,6 +411,15 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
             )
             print(f"W&B artifact uploaded: {logged.name}", flush=True)
 
+        if trainer.is_world_process_zero():
+            print(
+                "Full single-model SFT complete.\n"
+                f"Local LoRA adapter: {config.training.adapter_dir}\n"
+                f"W&B project: {config.tracking.project}\n"
+                "Merge step: not run (adapter remains separate).",
+                flush=True,
+            )
+
         finish_wandb(wandb_run, exit_code=0)
         return model, tokenizer, trainer
     except BaseException:
@@ -372,6 +430,7 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse CLI options, auto-launch DDP, then run all training stages."""
 
+    load_training_env()
     if __package__ in {None, ""}:
         from trainer.sft.cli import main as cli_main
     else:

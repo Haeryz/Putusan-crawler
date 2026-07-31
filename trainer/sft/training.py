@@ -20,15 +20,21 @@ def build_trainer(
 ) -> Any:
     """Create the notebook-equivalent trainer and mask prompt tokens."""
 
+    if config.eval_steps is None:
+        raise ValueError("eval_steps must be resolved before building the trainer")
     os.environ["UNSLOTH_RETURN_LOGITS"] = "0"
     from trl import SFTConfig, SFTTrainer
     from unsloth import FastLanguageModel
     from unsloth.chat_templates import train_on_responses_only
 
     FastLanguageModel.for_training(model)
+    text_tokenizer = get_text_tokenizer(tokenizer_or_processor)
+    # These runs supervise assistant responses only. Keeping the tail prevents
+    # a long user document from cutting off the assistant marker and target.
+    text_tokenizer.truncation_side = "left"
     trainer = SFTTrainer(
         model=model,
-        processing_class=get_text_tokenizer(tokenizer_or_processor),
+        processing_class=text_tokenizer,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         args=SFTConfig(

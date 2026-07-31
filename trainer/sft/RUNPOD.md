@@ -58,6 +58,12 @@ python -m trainer.sft.run_all --wandb-run-prefix run-001
 
 The production default is one complete epoch. Do not pass `--max-steps`
 unless intentionally limiting a smoke/debug run.
+The default cadence is `--eval-steps 38 --save-steps 50`. Token-length caches
+can be prepared before renting the pod with:
+
+```bash
+python -m trainer.sft.precompute_lengths
+```
 
 Detach with `Ctrl+B`, then `D`; reattach with:
 
@@ -112,6 +118,21 @@ W&B names use the same slug:
 
 Training saves LoRA adapters only. It never merges with the base weights and
 never uploads to Hugging Face automatically.
+
+After a completed ephemeral training pod has been terminated, a new pod can
+download the final LoRA artifacts from W&B and merge them without resuming
+training:
+
+```bash
+export WANDB_ENTITY="your-wandb-entity"
+python -m trainer.sft.merge --model qwen
+python -m trainer.sft.merge --model gemma
+python -m trainer.sft.merge --model deepseek
+```
+
+Wait for `W&B artifact uploaded` before terminating the training pod. A
+checkpoint artifact is resumable training state; the `<slug>-lora:latest`
+artifact is the completed adapter used by the merge command.
 
 Recommended persistent shell settings:
 

@@ -131,23 +131,40 @@ def load_adapter(
 ) -> tuple[Any, Any]:
     """Load locally saved adapters through Unsloth for inference."""
 
-    from unsloth import FastLanguageModel
+    from unsloth import FastLanguageModel, FastModel
 
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=str(destination),
-        max_seq_length=config.max_seq_length,
-        load_in_4bit=config.load_in_4bit,
-        text_only=True,
+    loader = (
+        FastModel
+        if config.loader_kind == "fast_model"
+        else FastLanguageModel
     )
-    FastLanguageModel.for_inference(model)
+    arguments: dict[str, Any] = {
+        "model_name": str(destination),
+        "max_seq_length": config.max_seq_length,
+        "load_in_4bit": config.load_in_4bit,
+    }
+    if config.loader_kind == "fast_language_model":
+        arguments["text_only"] = True
+    model, tokenizer = loader.from_pretrained(**arguments)
+    loader.for_inference(model)
     return model, tokenizer
 
 
-def save_merged(model: Any, tokenizer: Any, destination: Path) -> None:
+def save_merged(
+    model: Any,
+    tokenizer: Any,
+    destination: Path,
+    maximum_memory_usage: float = 0.75,
+) -> None:
     """Save a serving-ready 16-bit merged model locally."""
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    model.save_pretrained_merged(str(destination), tokenizer)
+    model.save_pretrained_merged(
+        str(destination),
+        tokenizer,
+        save_method="merged_16bit",
+        maximum_memory_usage=maximum_memory_usage,
+    )
 
 
 def push_adapter(model: Any, tokenizer: Any, repository: str, token: str) -> None:

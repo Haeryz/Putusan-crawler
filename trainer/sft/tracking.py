@@ -134,7 +134,10 @@ def fetch_length_cache(
 ) -> bool:
     """Download a previous run's token-length cache onto this machine."""
 
-    reference = f"{config.length_cache_artifact_name}:latest"
+    project = getattr(run, "project", None) or config.project
+    entity = getattr(run, "entity", None) or config.entity
+    prefix = f"{entity}/{project}" if entity else project
+    reference = f"{prefix}/{config.length_cache_artifact_name}:latest"
     try:
         artifact = run.use_artifact(
             reference, type=config.length_cache_artifact_type
@@ -178,10 +181,11 @@ def upload_length_cache(
         metadata=metadata,
     )
     artifact.add_file(str(cache_path), name=cache_path.name)
-    run.log_artifact(artifact, aliases=["latest"])
+    logged = run.log_artifact(artifact, aliases=["latest"])
+    committed = logged.wait(timeout=config.upload_timeout_seconds)
     print(
-        f"Token-length cache queued for upload as "
-        f"{config.length_cache_artifact_name}:latest.",
+        f"Token-length cache uploaded as "
+        f"{committed.name} with alias latest.",
         flush=True,
     )
 

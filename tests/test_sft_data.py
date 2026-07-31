@@ -112,6 +112,10 @@ def test_choose_max_length_rounds_up_and_reports_coverage() -> None:
     assert profile.coverage == 1.0
 
 
-def test_choose_max_length_rejects_context_cap_below_percentile() -> None:
-    with pytest.raises(ValueError, match="exceeds context cap"):
-        choose_max_length([100, 200, 300], context_cap=128, multiple=64)
+def test_choose_max_length_caps_and_reports_truncated_rows() -> None:
+    profile = choose_max_length(
+        [100, 200, 300], context_cap=128, multiple=64
+    )
+
+    assert profile.max_length == 128
+    assert profile.coverage == pytest.approx(1 / 3)

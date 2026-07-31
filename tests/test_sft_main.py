@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
 
 import pytest
 
+import trainer.sft.cli as sft_cli
 from trainer.sft.checkpoint import latest_checkpoint
 from trainer.sft.config import RunConfig, TrackingConfig
 from trainer.sft import main as workflow
@@ -32,6 +35,44 @@ def test_distributed_command_relaunches_same_script_and_arguments() -> None:
     ]
     assert "--nproc_per_node=2" in command
     assert command[-2:] == ["--max-steps", "7"]
+
+
+def test_cli_auto_detects_visible_gpus_and_relaunches_ddp(monkeypatch) -> None:
+    launch_calls: list[tuple[list[str], int]] = []
+    monkeypatch.setattr(sft_cli, "resolve_gpu_count", lambda requested: 2)
+    monkeypatch.setattr(workflow, "distributed_world_size", lambda: 1)
+    monkeypatch.setattr(
+        workflow,
+        "launch_distributed",
+        lambda argv, count: launch_calls.append((list(argv), count)) or 0,
+    )
+
+    assert sft_cli.main(["--model", "qwen"]) == 0
+    assert launch_calls == [(["--model", "qwen"], 2)]
+
+
+def test_main_loads_training_env_without_overriding_shell(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "HF_TOKEN=from-file\n"
+        "WANDB_API_KEY=wandb-file\n"
+        "HF_HOME=/workspace/.cache/huggingface\n"
+        "UNRELATED=ignored\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HF_TOKEN", "from-shell")
+    monkeypatch.delenv("WANDB_API_KEY", raising=False)
+    monkeypatch.delenv("HF_HOME", raising=False)
+
+    loaded = workflow.load_training_env(env_file)
+
+    assert loaded == {"WANDB_API_KEY", "HF_HOME"}
+    assert os.environ["HF_TOKEN"] == "from-shell"
+    assert os.environ["WANDB_API_KEY"] == "wandb-file"
+    assert os.environ["HF_HOME"] == "/workspace/.cache/huggingface"
+    assert "UNRELATED" not in os.environ
 
 
 def test_complete_workflow_runs_modules_in_order_and_uploads(
@@ -141,18 +182,13 @@ def test_complete_workflow_runs_modules_in_order_and_uploads(
         "finish_wandb",
         lambda run, exit_code: events.append(f"finish_{exit_code}"),
     )
-    config = RunConfig()
-    config = SimpleNamespace(
-        model=config.model,
-        data=config.data,
-        training=SimpleNamespace(
-            **{
-                **config.training.__dict__,
-                "adapter_dir": tmp_path / "adapter",
-                "effective_batch_size": config.training.effective_batch_size,
-            }
+    base_config = RunConfig()
+    config = replace(
+        base_config,
+        training=replace(
+            base_config.training,
+            adapter_dir=tmp_path / "adapter",
         ),
-        tracking=config.tracking,
     )
 
     returned_model, returned_tokenizer, _ = workflow.run_training(config)

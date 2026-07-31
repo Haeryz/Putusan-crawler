@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from pathlib import Path
 from typing import Literal
 
@@ -114,7 +115,6 @@ class DataConfig:
     length_percentile: int = 95
     length_multiple: int = 256
     tokenization_batch_size: int = 256
-    minimum_context_coverage: float = 0.94
     cache_dir: Path = Path("outputs/sft/qwen3-5-4b/cache")
     distributed_cache_timeout_seconds: int = 3_600
 
@@ -132,8 +132,9 @@ class TrainingConfig:
     max_steps: int = -1
     learning_rate: float = 2e-4
     logging_steps: int = 1
-    eval_steps: int = 10
-    save_steps: int = 5
+    eval_steps: int | None = 38
+    evaluations_per_epoch: int = 4
+    save_steps: int = 50
     weight_decay: float = 0.001
     seed: int = 3407
     report_to: str = "wandb"
@@ -152,12 +153,39 @@ class TrainingConfig:
             * self.gradient_accumulation_steps
         )
 
+    def optimizer_steps_per_epoch(
+        self, train_rows: int, world_size: int
+    ) -> int:
+        """Return DDP optimizer updates needed to consume one epoch."""
+
+        if train_rows < 1:
+            raise ValueError("train_rows must be positive")
+        if world_size < 1:
+            raise ValueError("world_size must be positive")
+        rows_per_worker = math.ceil(train_rows / world_size)
+        micro_batches = math.ceil(
+            rows_per_worker / self.per_device_train_batch_size
+        )
+        return math.ceil(micro_batches / self.gradient_accumulation_steps)
+
+    def resolved_eval_steps(self, train_rows: int, world_size: int) -> int:
+        """Use an explicit interval or spread evaluations across each epoch."""
+
+        if self.eval_steps is not None:
+            return self.eval_steps
+        if self.evaluations_per_epoch < 1:
+            raise ValueError("evaluations_per_epoch must be positive")
+        steps = self.optimizer_steps_per_epoch(train_rows, world_size)
+        # Floor division ensures the Kth evaluation occurs before the epoch's
+        # final step when the step count is not exactly divisible by K.
+        return max(1, steps // self.evaluations_per_epoch)
+
 
 @dataclass(frozen=True)
 class TrackingConfig:
     """Weights & Biases run and model-artifact settings."""
 
-    project: str = "putusan-sft"
+    project: str = "Sinergi-training"
     entity: str | None = None
     run_name: str | None = None
     artifact_name: str = "qwen3-5-4b-lora"
