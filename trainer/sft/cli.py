@@ -65,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "examples:\n"
             "  python trainer/sft/main.py --modelname qwen\n"
+            "  python trainer/sft/main.py --modelname qwen --half-epoch\n"
             "  python -m trainer.sft --modelname qwen\n"
             "  python -m trainer.sft --model gemma --gpu-count 2 "
             "--dataset-config sft_sections\n"
@@ -95,11 +96,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=defaults.data.subset,
         help="Dataset subset/config, such as sft or sft_sections",
     )
-    parser.add_argument(
+    epoch_group = parser.add_mutually_exclusive_group()
+    epoch_group.add_argument(
         "--num-train-epochs",
         type=positive_float,
         default=defaults.training.num_train_epochs,
         help="Number of complete passes over the training split",
+    )
+    epoch_group.add_argument(
+        "--half-epoch",
+        action="store_true",
+        help="Train for half a pass over the training split (0.5 epoch)",
     )
     parser.add_argument(
         "--max-steps",
@@ -227,7 +234,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         ),
         training=replace(
             config.training,
-            num_train_epochs=args.num_train_epochs,
+            num_train_epochs=(0.5 if args.half_epoch else args.num_train_epochs),
             max_steps=args.max_steps if args.max_steps is not None else -1,
             eval_steps=(
                 None

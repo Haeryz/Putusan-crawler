@@ -28,8 +28,6 @@ def build_training_command(
         args.dataset,
         "--dataset-config",
         args.dataset_config,
-        "--num-train-epochs",
-        str(args.num_train_epochs),
         "--save-steps",
         str(args.save_steps),
         "--gpu-count",
@@ -47,6 +45,10 @@ def build_training_command(
             else profile.slug
         ),
     ]
+    if args.half_epoch:
+        command.append("--half-epoch")
+    else:
+        command.extend(("--num-train-epochs", str(args.num_train_epochs)))
     if args.max_steps is not None:
         command.extend(("--max-steps", str(args.max_steps)))
     if args.evaluations_per_epoch is not None:
@@ -98,9 +100,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--dataset-config", default="sft",
         help="Dataset subset/config, such as sft or sft_sections",
     )
-    parser.add_argument(
+    epoch_group = parser.add_mutually_exclusive_group()
+    epoch_group.add_argument(
         "--num-train-epochs", type=positive_float, default=1.0,
         help="Number of complete passes for each model",
+    )
+    epoch_group.add_argument(
+        "--half-epoch", action="store_true",
+        help="Train every model for half a pass over its training split",
     )
     parser.add_argument(
         "--max-steps",

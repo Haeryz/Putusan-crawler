@@ -17,6 +17,7 @@ def runner_args(**overrides) -> Namespace:
         "dataset": "Haeryz/putusan-structured-extraction",
         "dataset_config": "sft",
         "num_train_epochs": 1.0,
+        "half_epoch": False,
         "max_steps": None,
         "eval_steps": 38,
         "evaluations_per_epoch": None,
@@ -57,6 +58,13 @@ def test_sequential_commands_select_each_profile_and_unique_run_name() -> None:
         ]
         == "trial-deepseek-r1-distill-qwen-1-5b"
     )
+
+
+def test_sequential_command_passes_half_epoch_preset() -> None:
+    command = build_training_command("qwen", runner_args(half_epoch=True))
+
+    assert "--half-epoch" in command
+    assert "--num-train-epochs" not in command
 
 
 def test_hub_config_modality_inference_distinguishes_three_architectures() -> None:

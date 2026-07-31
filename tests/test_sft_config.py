@@ -50,6 +50,7 @@ def test_cli_help_documents_gpu_auto_detection_and_batch_formula() -> None:
     assert "all CUDA GPUs visible" in help_text
     assert "Effective batch" in help_text
     assert "automatically left-truncated" in help_text
+    assert "--half-epoch" in help_text
     assert "Override auto-detection" in help_text
     assert "python -m trainer.sft.run_all" in help_text
 
@@ -126,6 +127,22 @@ def test_modelname_alias_selects_one_full_training_profile() -> None:
     assert config.training.max_steps == -1
     assert config.training.num_train_epochs == 1.0
     assert config.tracking.upload_adapter is True
+
+
+def test_half_epoch_switch_selects_half_of_training_rows() -> None:
+    args = build_parser().parse_args(["--modelname", "qwen", "--half-epoch"])
+    config = config_from_args(args)
+
+    assert args.half_epoch is True
+    assert config.training.num_train_epochs == 0.5
+    assert config.training.max_steps == -1
+
+
+def test_half_epoch_rejects_a_second_epoch_length() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["--half-epoch", "--num-train-epochs", "2"]
+        )
 
 
 def test_no_wandb_upload_disables_checkpoint_and_lora_artifacts() -> None:

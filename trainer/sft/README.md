@@ -79,6 +79,16 @@ python trainer/sft/main.py --modelname gemma
 python trainer/sft/main.py --modelname deepseek
 ```
 
+For a shorter half-epoch run, add `--half-epoch`:
+
+```bash
+python trainer/sft/main.py --modelname qwen --half-epoch
+```
+
+`--half-epoch` processes approximately half of the shuffled training split and
+is mutually exclusive with `--num-train-epochs`. It still performs evaluation,
+checkpointing, final LoRA saving, and the confirmed W&B upload.
+
 The equivalent package form is
 `python -m trainer.sft --modelname <qwen|gemma|deepseek>`. The command loads
 `trainer/sft/.env`, auto-detects and uses all visible GPUs, restores the
