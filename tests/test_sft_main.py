@@ -6,9 +6,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from trainer.sft.checkpoint import latest_checkpoint
 from trainer.sft.config import RunConfig, TrackingConfig
 from trainer.sft import main as workflow
-from trainer.sft.tracking import log_model_artifact
+from trainer.sft import tracking
+from trainer.sft.tracking import (
+    checkpoint_upload_callback,
+    log_checkpoint_artifact,
+    log_model_artifact,
+)
 
 
 def test_distributed_command_relaunches_same_script_and_arguments() -> None:
@@ -37,7 +43,11 @@ def test_complete_workflow_runs_modules_in_order_and_uploads(
     wandb_run = object()
 
     class FakeTrainer:
-        def train(self):
+        def add_callback(self, callback):
+            events.append("add_checkpoint_callback")
+
+        def train(self, *, resume_from_checkpoint):
+            assert resume_from_checkpoint is None
             events.append("train")
             return SimpleNamespace(metrics={"train_loss": 1.25})
 
@@ -57,13 +67,13 @@ def test_complete_workflow_runs_modules_in_order_and_uploads(
     )
     monkeypatch.setattr(
         workflow,
-        "load_base_model",
-        lambda config: events.append("load_model") or (model, tokenizer),
+        "synchronize_wandb_checkpoint_restore",
+        lambda config, run: events.append("restore_checkpoint"),
     )
     monkeypatch.setattr(
         workflow,
-        "verify_long_context_stack",
-        lambda loaded_model: events.append("verify"),
+        "load_base_model",
+        lambda config: events.append("load_model") or (model, tokenizer),
     )
     monkeypatch.setattr(
         workflow,
@@ -78,13 +88,17 @@ def test_complete_workflow_runs_modules_in_order_and_uploads(
     monkeypatch.setattr(
         workflow,
         "format_dataset",
-        lambda dataset, loaded_tokenizer: events.append("format") or dataset,
+        lambda dataset, loaded_tokenizer, model_config: events.append("format")
+        or dataset,
     )
     monkeypatch.setattr(
         workflow,
         "load_or_measure_lengths",
         lambda dataset, loaded_tokenizer, config: events.append("lengths")
         or [100],
+    )
+    monkeypatch.setattr(
+        workflow, "load_cached_lengths", lambda dataset, config: [100]
     )
     profile = SimpleNamespace(
         p50=100,
@@ -105,6 +119,12 @@ def test_complete_workflow_runs_modules_in_order_and_uploads(
         "build_trainer",
         lambda *args: events.append("build_trainer") or FakeTrainer(),
     )
+    monkeypatch.setattr(
+        workflow,
+        "checkpoint_upload_callback",
+        lambda *args: events.append("build_checkpoint_callback") or object(),
+    )
+    monkeypatch.setattr(workflow, "latest_checkpoint", lambda output_dir: None)
     monkeypatch.setattr(
         workflow,
         "save_adapter",
@@ -142,8 +162,8 @@ def test_complete_workflow_runs_modules_in_order_and_uploads(
     assert events == [
         "validate",
         "wandb_init",
+        "restore_checkpoint",
         "load_model",
-        "verify",
         "attach",
         "load_splits",
         "format",
@@ -151,6 +171,8 @@ def test_complete_workflow_runs_modules_in_order_and_uploads(
         "lengths",
         "choose_context",
         "build_trainer",
+        "build_checkpoint_callback",
+        "add_checkpoint_callback",
         "train",
         "save_adapter",
         "upload_artifact",
@@ -204,3 +226,106 @@ def test_wandb_upload_rejects_missing_adapter(tmp_path: Path) -> None:
             object(), tmp_path / "missing", TrackingConfig(), {}
         )
 
+
+def test_wandb_checkpoint_upload_adds_resumable_directory_and_waits(
+    monkeypatch, tmp_path: Path
+) -> None:
+    checkpoint_dir = tmp_path / "checkpoint-5"
+    checkpoint_dir.mkdir()
+    (checkpoint_dir / "trainer_state.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    captured: dict[str, object] = {}
+
+    class FakeArtifact:
+        def __init__(self, **kwargs):
+            captured["artifact_kwargs"] = kwargs
+
+        def add_dir(self, *, local_path: str, name: str) -> None:
+            captured["directory"] = (local_path, name)
+
+    class LoggedArtifact:
+        name = "checkpoint:v0"
+
+        def wait(self, *, timeout: int):
+            captured["timeout"] = timeout
+            return self
+
+    class FakeRun:
+        def log_artifact(self, artifact, *, aliases):
+            captured["aliases"] = aliases
+            return LoggedArtifact()
+
+    monkeypatch.setitem(
+        sys.modules, "wandb", SimpleNamespace(Artifact=FakeArtifact)
+    )
+    config = TrackingConfig(upload_timeout_seconds=456)
+
+    logged = log_checkpoint_artifact(
+        FakeRun(),
+        checkpoint_dir,
+        global_step=5,
+        config=config,
+        metadata={"base_model": "Qwen/Qwen3.5-4B"},
+    )
+
+    assert isinstance(logged, LoggedArtifact)
+    assert captured["directory"] == (str(checkpoint_dir), "checkpoint")
+    assert captured["aliases"] == ["latest", "step-5"]
+    assert captured["timeout"] == 456
+    artifact_kwargs = captured["artifact_kwargs"]
+    assert isinstance(artifact_kwargs, dict)
+    assert artifact_kwargs["metadata"]["global_step"] == 5
+
+
+def test_checkpoint_callback_uploads_the_just_saved_step(
+    monkeypatch, tmp_path: Path
+) -> None:
+    checkpoint_dir = tmp_path / "checkpoint-10"
+    checkpoint_dir.mkdir()
+    calls: list[tuple[Path, int]] = []
+
+    class FakeTrainerCallback:
+        pass
+
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(TrainerCallback=FakeTrainerCallback),
+    )
+    monkeypatch.setattr(
+        tracking,
+        "log_checkpoint_artifact",
+        lambda run, path, step, config, metadata: (
+            calls.append((path, step))
+            or SimpleNamespace(name="checkpoint:v1")
+        ),
+    )
+    control = object()
+    callback = checkpoint_upload_callback(
+        object(), TrackingConfig(), {"max_steps": 30}
+    )
+
+    returned = callback.on_save(
+        SimpleNamespace(output_dir=str(tmp_path)),
+        SimpleNamespace(global_step=10),
+        control,
+    )
+
+    assert returned is control
+    assert calls == [(checkpoint_dir, 10)]
+
+
+def test_latest_checkpoint_ignores_incomplete_save_and_uses_highest_step(
+    tmp_path: Path,
+) -> None:
+    for step in (5, 10):
+        checkpoint = tmp_path / f"checkpoint-{step}"
+        checkpoint.mkdir()
+        (checkpoint / "trainer_state.json").write_text(
+            "{}", encoding="utf-8"
+        )
+    (tmp_path / "checkpoint-15").mkdir()
+    (tmp_path / "checkpoint-invalid").mkdir()
+
+    assert latest_checkpoint(tmp_path) == tmp_path / "checkpoint-10"

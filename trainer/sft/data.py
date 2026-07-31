@@ -9,7 +9,7 @@ from pathlib import Path
 import time
 from typing import Any, Iterable, Sequence
 
-from .config import DataConfig
+from .config import DataConfig, ModelConfig
 
 
 @dataclass(frozen=True)
@@ -43,26 +43,42 @@ def load_splits(config: DataConfig) -> tuple[Any, Any]:
 
 
 def format_messages(
-    examples: dict[str, Sequence[Any]], tokenizer: Any
+    examples: dict[str, Sequence[Any]],
+    tokenizer_or_processor: Any,
+    model_config: ModelConfig,
 ) -> dict[str, list[str]]:
-    """Render batched messages with the model chat template."""
+    """Render text-only messages with the selected model's chat template."""
 
-    return {
-        "text": [
-            tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=False
-            )
-            for messages in examples["messages"]
-        ]
-    }
+    texts: list[str] = []
+    for conversation in examples["messages"]:
+        for message in conversation:
+            content = message.get("content")
+            if not isinstance(content, str):
+                raise ValueError(
+                    f"{model_config.profile_name} SFT accepts text-only message "
+                    "content; multimodal content blocks are not allowed"
+                )
+        text = tokenizer_or_processor.apply_chat_template(
+            conversation, tokenize=False, add_generation_prompt=False
+        )
+        if model_config.strip_bos_from_formatted_text:
+            text = text.removeprefix("<bos>")
+        texts.append(text)
+    return {"text": texts}
 
 
-def format_dataset(dataset: Any, tokenizer_or_processor: Any) -> Any:
+def format_dataset(
+    dataset: Any,
+    tokenizer_or_processor: Any,
+    model_config: ModelConfig,
+) -> Any:
     """Add the text field consumed by SFTTrainer."""
 
-    tokenizer = get_text_tokenizer(tokenizer_or_processor)
     return dataset.map(
-        lambda examples: format_messages(examples, tokenizer), batched=True
+        lambda examples: format_messages(
+            examples, tokenizer_or_processor, model_config
+        ),
+        batched=True,
     )
 
 

@@ -8,6 +8,13 @@ cd "${REPO_ROOT}"
 VENV_DIR="${REPO_ROOT}/.venv"
 SETUP_MARKER="${VENV_DIR}/.runpod-setup.sha256"
 SETUP_HASH="$(sha256sum "${SCRIPT_DIR}/setup_runpod.sh" | cut -d ' ' -f 1)"
+ENV_FILE="${SCRIPT_DIR}/.env"
+if [[ -f "${ENV_FILE}" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}"
+  set +a
+fi
 
 # The 4-bit warm load below reads the cache download_model.sh wrote. Without the
 # same HF_HOME it would silently re-download ~9.3 GB onto the container disk.
@@ -27,7 +34,7 @@ if [[ -x "${VENV_DIR}/bin/python" ]]; then
     source "${VENV_DIR}/bin/activate"
     echo "RunPod SFT environment is already up to date."
     echo "Activate it with: source ${VENV_DIR}/bin/activate"
-    echo "Then run: cd ${SCRIPT_DIR} && python main.py"
+    echo "Then run: python -m trainer.sft.run_all"
     exit 0
   fi
 elif [[ -e "${VENV_DIR}" ]]; then
@@ -51,11 +58,11 @@ source "${VENV_DIR}/bin/activate"
 uv pip install "torch==2.8.0" "triton>=3.3.0" torchvision bitsandbytes "xformers==0.0.32.post2"
 uv pip install "unsloth_zoo[base] @ git+https://github.com/unslothai/unsloth-zoo" "unsloth[base] @ git+https://github.com/unslothai/unsloth"
 uv pip install --no-deps "torchcodec==0.7.0"
-uv pip install --upgrade --no-deps "tokenizers>=0.22.0,<=0.23.0" "trl==0.22.2" unsloth unsloth_zoo
-uv pip install "transformers==5.2.0"
+uv pip install --upgrade --no-deps "tokenizers>=0.22.0,<=0.23.0" "unsloth>=2026.4.2" unsloth_zoo
+uv pip install "transformers>=5.5.0,<5.6" "trl>=0.28.0,<0.29" "huggingface_hub>=1.5.0" "datasets==4.3.0"
 uv pip install --no-build-isolation flash-linear-attention "causal_conv1d==1.6.0"
 uv pip install --no-deps "apache-tvm-ffi==0.1.9" "tilelang==0.1.8" "torchao>=0.16.0"
-uv pip install datasets wandb numpy tqdm peft
+uv pip install wandb numpy tqdm peft accelerate sentencepiece protobuf timm librosa packaging
 uv pip install -e .
 
 python - <<'PY'
@@ -71,26 +78,13 @@ if torch.cuda.device_count() < 1:
     raise SystemExit("The SFT profile requires one visible GPU.")
 PY
 
-# Load the cached weights once, in 4-bit, so the silent Unsloth import and its
-# Triton kernel compile happen here rather than at stage 3 of a training run.
-# This also fails fast if the checkpoint cannot be quantized on this GPU.
-python - <<'PY'
-import time
-
-from trainer.sft.config import ModelConfig
-from trainer.sft.transformer import load_base_model
-
-config = ModelConfig()
-print()
-print(f"Warming the 4-bit load of {config.model_name}.")
-start = time.monotonic()
-model, tokenizer = load_base_model(config)
-print(f"Model loaded in 4-bit in {(time.monotonic() - start) / 60:.1f} min.")
-PY
+# Compile kernels and verify each architecture, text-only LoRA policy,
+# tokenizer, dataset row, Hub access, W&B login, and one finite forward loss.
+python -m trainer.sft.preflight --deep
 
 printf '%s\n' "${SETUP_HASH}" > "${SETUP_MARKER}"
 
 echo
 echo "RunPod SFT environment is ready."
 echo "Activate it with: source ${VENV_DIR}/bin/activate"
-echo "Then run: cd ${SCRIPT_DIR} && python main.py"
+echo "Then run: python -m trainer.sft.run_all"

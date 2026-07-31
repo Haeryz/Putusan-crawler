@@ -2,10 +2,120 @@
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
+import re
+import tempfile
 from typing import Any
 
 from .config import ModelConfig
+
+
+def latest_checkpoint(output_dir: Path) -> Path | None:
+    """Return the highest-numbered complete Trainer checkpoint, if any."""
+
+    if not output_dir.is_dir():
+        return None
+    candidates: list[tuple[int, Path]] = []
+    for path in output_dir.glob("checkpoint-*"):
+        if not path.is_dir():
+            continue
+        try:
+            step = int(path.name.removeprefix("checkpoint-"))
+        except ValueError:
+            continue
+        # Trainer writes this after the model, optimizer, scheduler, and RNG
+        # state. Ignoring directories without it avoids resuming a save that
+        # was interrupted halfway through.
+        if (path / "trainer_state.json").is_file():
+            candidates.append((step, path))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
+
+
+def checkpoint_step(path: Path | None) -> int:
+    """Return a checkpoint directory's numeric step, or zero when absent."""
+
+    if path is None:
+        return 0
+    try:
+        return int(path.name.removeprefix("checkpoint-"))
+    except ValueError as error:
+        raise ValueError(f"Invalid checkpoint directory name: {path}") from error
+
+
+def artifact_checkpoint_step(artifact: Any) -> int | None:
+    """Read a Trainer step from W&B metadata or a step-N alias."""
+
+    metadata = getattr(artifact, "metadata", {}) or {}
+    try:
+        step = int(metadata["global_step"])
+    except (KeyError, TypeError, ValueError):
+        step = 0
+    if step > 0:
+        return step
+    for alias in getattr(artifact, "aliases", ()) or ():
+        match = re.fullmatch(r"step-(\d+)", str(alias))
+        if match and int(match.group(1)) > 0:
+            return int(match.group(1))
+    return None
+
+
+def restore_checkpoint_artifact(
+    artifact: Any,
+    output_dir: Path,
+    expected_step: int,
+) -> Path:
+    """Atomically restore one W&B artifact as a Trainer checkpoint."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    destination = output_dir / f"checkpoint-{expected_step}"
+    if destination.exists():
+        if (destination / "trainer_state.json").is_file():
+            return destination
+        quarantine = output_dir / f".incomplete-checkpoint-{expected_step}"
+        suffix = 1
+        while quarantine.exists():
+            quarantine = output_dir / (
+                f".incomplete-checkpoint-{expected_step}-{suffix}"
+            )
+            suffix += 1
+        os.replace(destination, quarantine)
+        print(
+            f"Moved incomplete local checkpoint to {quarantine}.",
+            flush=True,
+        )
+
+    with tempfile.TemporaryDirectory(
+        prefix=".wandb-checkpoint-", dir=output_dir
+    ) as temporary:
+        downloaded = Path(artifact.download(root=temporary))
+        source = downloaded / "checkpoint"
+        state_path = source / "trainer_state.json"
+        if not state_path.is_file():
+            raise RuntimeError(
+                "W&B checkpoint artifact is missing "
+                "checkpoint/trainer_state.json"
+            )
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            saved_step = int(state["global_step"])
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise RuntimeError(
+                f"Invalid Trainer state in W&B checkpoint: {state_path}"
+            ) from error
+        if saved_step != expected_step:
+            raise RuntimeError(
+                f"W&B artifact metadata says step {expected_step}, but "
+                f"trainer_state.json says step {saved_step}"
+            )
+        # The temporary directory is under output_dir, so this rename is an
+        # atomic operation on one filesystem. A failed download never creates
+        # a checkpoint-N directory that latest_checkpoint could select.
+        os.replace(source, destination)
+    return destination
 
 
 def save_adapter(model: Any, tokenizer: Any, destination: Path) -> None:
@@ -51,4 +161,3 @@ def push_merged(model: Any, tokenizer: Any, repository: str, token: str) -> None
     """Publish a serving-ready merged model explicitly."""
 
     model.push_to_hub_merged(repository, tokenizer, token=token)
-

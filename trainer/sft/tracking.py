@@ -7,6 +7,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from .checkpoint import (
+    artifact_checkpoint_step,
+    checkpoint_step,
+    latest_checkpoint,
+    restore_checkpoint_artifact,
+)
 from .config import RunConfig, TrackingConfig
 
 
@@ -28,6 +34,99 @@ def initialize_wandb(config: RunConfig) -> Any:
         job_type="sft",
         config=_serializable_config(config),
     )
+
+
+def _checkpoint_matches_run(artifact: Any, config: RunConfig) -> bool:
+    """Require identity metadata before resuming executable training state."""
+
+    metadata = getattr(artifact, "metadata", {}) or {}
+    expected = {
+        "base_model": config.model.model_name,
+        "dataset": config.data.repository,
+        "dataset_config": config.data.subset,
+    }
+    return all(metadata.get(key) == value for key, value in expected.items())
+
+
+def find_newest_wandb_checkpoint(
+    run: Any, config: RunConfig
+) -> tuple[Any, int] | None:
+    """Scan the model's W&B collection for its highest compatible step."""
+
+    import wandb
+
+    entity = getattr(run, "entity", None) or config.tracking.entity
+    project = getattr(run, "project", None) or config.tracking.project
+    if not entity:
+        raise RuntimeError(
+            "W&B did not resolve an entity for automatic checkpoint restore"
+        )
+    collection_name = (
+        f"{entity}/{project}/{config.tracking.checkpoint_artifact_name}"
+    )
+    api = wandb.Api()
+    if not api.artifact_collection_exists(
+        collection_name, config.tracking.checkpoint_artifact_type
+    ):
+        print(
+            f"No W&B checkpoint collection found at {collection_name}.",
+            flush=True,
+        )
+        return None
+    collection = api.artifact_collection(
+        config.tracking.checkpoint_artifact_type,
+        collection_name,
+    )
+    candidates: list[tuple[int, Any]] = []
+    for artifact in collection.artifacts():
+        step = artifact_checkpoint_step(artifact)
+        if step is not None and _checkpoint_matches_run(artifact, config):
+            candidates.append((step, artifact))
+    if not candidates:
+        print(
+            f"No compatible checkpoints found in {collection_name}.",
+            flush=True,
+        )
+        return None
+    step, artifact = max(candidates, key=lambda item: item[0])
+    return artifact, step
+
+
+def restore_newest_wandb_checkpoint(
+    run: Any, config: RunConfig
+) -> Path | None:
+    """Restore W&B only when its newest compatible step beats local state."""
+
+    local = latest_checkpoint(config.training.output_dir)
+    local_step = checkpoint_step(local)
+    remote = find_newest_wandb_checkpoint(run, config)
+    if remote is None:
+        if local is not None:
+            print(f"Using local checkpoint {local}.", flush=True)
+        return local
+    artifact, remote_step = remote
+    if local_step >= remote_step:
+        print(
+            f"Local checkpoint step {local_step} is at least as new as W&B "
+            f"step {remote_step}; no download needed.",
+            flush=True,
+        )
+        return local
+
+    version = getattr(artifact, "version", "unknown")
+    print(
+        f"Restoring W&B checkpoint "
+        f"{config.tracking.checkpoint_artifact_name}:{version} "
+        f"(step {remote_step})...",
+        flush=True,
+    )
+    restored = restore_checkpoint_artifact(
+        artifact,
+        config.training.output_dir,
+        remote_step,
+    )
+    print(f"W&B checkpoint restored to {restored}.", flush=True)
+    return restored
 
 
 def fetch_length_cache(
@@ -104,7 +203,7 @@ def log_model_artifact(
     artifact = wandb.Artifact(
         name=config.artifact_name,
         type=config.artifact_type,
-        description="Qwen3.5 putusan structured-extraction LoRA adapters",
+        description="Putusan structured-extraction LoRA adapters",
         metadata=metadata,
     )
     artifact.add_dir(local_path=str(adapter_dir), name="adapter")
@@ -112,6 +211,72 @@ def log_model_artifact(
         artifact, aliases=list(config.artifact_aliases)
     )
     return logged_artifact.wait(timeout=config.upload_timeout_seconds)
+
+
+def log_checkpoint_artifact(
+    run: Any,
+    checkpoint_dir: Path,
+    global_step: int,
+    config: TrackingConfig,
+    metadata: dict[str, Any],
+) -> Any:
+    """Upload one resumable Trainer checkpoint and wait for its commit."""
+
+    if not checkpoint_dir.is_dir():
+        raise FileNotFoundError(
+            f"Cannot upload missing checkpoint directory: {checkpoint_dir}"
+        )
+    import wandb
+
+    artifact = wandb.Artifact(
+        name=config.checkpoint_artifact_name,
+        type=config.checkpoint_artifact_type,
+        description="Resumable SFT Trainer checkpoint",
+        metadata={**metadata, "global_step": global_step},
+    )
+    artifact.add_dir(local_path=str(checkpoint_dir), name="checkpoint")
+    logged_artifact = run.log_artifact(
+        artifact,
+        aliases=["latest", f"step-{global_step}"],
+    )
+    return logged_artifact.wait(timeout=config.upload_timeout_seconds)
+
+
+def checkpoint_upload_callback(
+    run: Any,
+    config: TrackingConfig,
+    metadata: dict[str, Any],
+) -> Any:
+    """Build a Trainer callback that commits every saved checkpoint to W&B."""
+
+    from transformers import TrainerCallback
+
+    class WandbCheckpointUploadCallback(TrainerCallback):
+        def on_save(
+            self,
+            args: Any,
+            state: Any,
+            control: Any,
+            **kwargs: Any,
+        ) -> Any:
+            checkpoint_dir = (
+                Path(args.output_dir) / f"checkpoint-{state.global_step}"
+            )
+            logged = log_checkpoint_artifact(
+                run,
+                checkpoint_dir,
+                state.global_step,
+                config,
+                metadata,
+            )
+            print(
+                f"W&B checkpoint uploaded: {logged.name} "
+                f"(step {state.global_step})",
+                flush=True,
+            )
+            return control
+
+    return WandbCheckpointUploadCallback()
 
 
 def finish_wandb(run: Any | None, exit_code: int) -> None:

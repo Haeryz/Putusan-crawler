@@ -4,7 +4,16 @@ from types import SimpleNamespace
 import pytest
 
 from trainer.sft.cli import build_parser, config_from_args
-from trainer.sft.config import RunConfig
+from trainer.sft.config import (
+    MODEL_ORDER,
+    MODEL_PROFILES,
+    ModelConfig,
+    RunConfig,
+    TrainingConfig,
+    model_config_for,
+    run_config_for_model,
+)
+from trainer.sft.training import build_trainer
 from trainer.sft.transformer import (
     validate_distributed_launch,
     validate_hardware,
@@ -20,13 +29,17 @@ def test_short_single_a100_experiment_defaults_are_explicit() -> None:
     assert config.model.require_distributed_launch is False
     assert config.model.minimum_vram_gb == 78.0
     assert config.data.subset == "sft"
-    assert config.training.max_steps == 30
+    assert config.training.num_train_epochs == 1.0
+    assert config.training.max_steps == -1
     assert config.training.eval_steps == 10
+    assert config.training.save_steps == 5
     assert config.training.per_device_train_batch_size == 1
     assert config.training.gradient_accumulation_steps == 8
     assert config.training.effective_batch_size(world_size=1) == 8
     assert config.tracking.project == "putusan-sft"
     assert config.tracking.upload_adapter is True
+    assert config.tracking.upload_checkpoints is True
+    assert config.tracking.restore_checkpoints is True
 
 
 def test_cli_accepts_training_overrides() -> None:
@@ -36,6 +49,8 @@ def test_cli_accepts_training_overrides() -> None:
             "7",
             "--eval-steps",
             "2",
+            "--save-steps",
+            "5",
             "--gpu-count",
             "2",
             "--per-device-batch-size",
@@ -47,11 +62,14 @@ def test_cli_accepts_training_overrides() -> None:
             "court-extractor",
             "--wandb-artifact-name",
             "stage-1-lora",
+            "--wandb-checkpoint-artifact-name",
+            "stage-1-checkpoint",
         ]
     )
 
     assert args.max_steps == 7
     assert args.eval_steps == 2
+    assert args.save_steps == 5
     assert args.gpu_count == 2
     assert args.per_device_batch_size == 1
     assert args.gradient_accumulation_steps == 4
@@ -59,15 +77,135 @@ def test_cli_accepts_training_overrides() -> None:
     assert args.dataset_config == "sft"
     assert args.wandb_project == "court-extractor"
     assert args.wandb_artifact_name == "stage-1-lora"
+    assert args.wandb_checkpoint_artifact_name == "stage-1-checkpoint"
 
     config = config_from_args(args)
     assert config.training.max_steps == 7
+    assert config.training.num_train_epochs == 1.0
     assert config.training.eval_steps == 2
+    assert config.training.save_steps == 5
     assert config.model.required_gpu_count == 2
     assert config.model.require_distributed_launch is True
     assert config.tracking.project == "court-extractor"
     assert config.tracking.artifact_name == "stage-1-lora"
+    assert config.tracking.checkpoint_artifact_name == "stage-1-checkpoint"
     assert config.tracking.upload_adapter is True
+    assert config.tracking.upload_checkpoints is True
+
+
+def test_no_wandb_upload_disables_checkpoint_and_lora_artifacts() -> None:
+    config = config_from_args(
+        build_parser().parse_args(["--no-wandb-upload"])
+    )
+
+    assert config.tracking.upload_adapter is False
+    assert config.tracking.upload_checkpoints is False
+    assert config.tracking.restore_checkpoints is True
+
+
+def test_no_wandb_resume_disables_only_remote_checkpoint_restore() -> None:
+    config = config_from_args(
+        build_parser().parse_args(["--no-wandb-resume"])
+    )
+
+    assert config.tracking.restore_checkpoints is False
+    assert config.tracking.upload_adapter is True
+    assert config.tracking.upload_checkpoints is True
+
+
+def test_trainer_saves_resumable_state_every_configured_steps(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeFastLanguageModel:
+        @staticmethod
+        def for_training(model) -> None:
+            captured["training_model"] = model
+
+    class FakeSFTTrainer:
+        def __init__(self, **kwargs):
+            captured["trainer_kwargs"] = kwargs
+            self.train_dataset = kwargs["train_dataset"]
+            self.eval_dataset = kwargs["eval_dataset"]
+
+    def fake_sft_config(**kwargs):
+        captured["sft_config"] = kwargs
+        return kwargs
+
+    monkeypatch.setitem(
+        sys.modules,
+        "trl",
+        SimpleNamespace(SFTConfig=fake_sft_config, SFTTrainer=FakeSFTTrainer),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "unsloth",
+        SimpleNamespace(FastLanguageModel=FakeFastLanguageModel),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "unsloth.chat_templates",
+        SimpleNamespace(train_on_responses_only=lambda trainer, **kwargs: trainer),
+    )
+
+    build_trainer(
+        object(),
+        object(),
+        [1],
+        [2],
+        max_length=256,
+        config=TrainingConfig(save_steps=5),
+        model_config=ModelConfig(),
+    )
+
+    sft_config = captured["sft_config"]
+    assert isinstance(sft_config, dict)
+    assert sft_config["save_strategy"] == "steps"
+    assert sft_config["save_steps"] == 5
+    assert sft_config["save_only_model"] is False
+    assert sft_config["num_train_epochs"] == 1.0
+    assert sft_config["max_steps"] == -1
+
+
+def test_supported_model_profiles_match_hub_architectures_and_modalities() -> None:
+    assert MODEL_ORDER == ("qwen", "gemma", "llama")
+    assert MODEL_PROFILES["qwen"].input_modalities == (
+        "text", "image", "video"
+    )
+    gemma = MODEL_PROFILES["gemma"]
+    assert gemma.architecture == "Gemma4ForConditionalGeneration"
+    assert gemma.input_modalities == ("text", "image", "audio", "video")
+    assert gemma.lora_kind == "multimodal_language_only"
+    assert "vision_tower" in gemma.non_text_module_fragments
+    assert "audio_tower" in gemma.non_text_module_fragments
+    llama = model_config_for("meta-llama/Llama-3.2-3B-Instruct")
+    assert llama.architecture == "LlamaForCausalLM"
+    assert llama.input_modalities == ("text",)
+
+
+def test_each_model_uses_isolated_local_and_wandb_names() -> None:
+    configs = [
+        run_config_for_model(MODEL_PROFILES[key]) for key in MODEL_ORDER
+    ]
+
+    assert len({config.training.output_dir for config in configs}) == 3
+    assert len({config.training.adapter_dir for config in configs}) == 3
+    assert len({config.data.cache_dir for config in configs}) == 3
+    assert len({config.tracking.artifact_name for config in configs}) == 3
+
+
+def test_cli_selects_gemma_profile_and_derived_paths() -> None:
+    config = config_from_args(
+        build_parser().parse_args(["--model", "gemma"])
+    )
+
+    assert config.model.model_name == "google/gemma-4-E2B-it"
+    assert config.model.loader_kind == "fast_model"
+    assert config.training.output_dir.as_posix().endswith(
+        "gemma-4-e2b/checkpoints"
+    )
+    assert config.tracking.artifact_name == "gemma-4-e2b-lora"
 
 
 def test_two_worker_torchrun_environment_is_required_for_two_gpu_override() -> None:

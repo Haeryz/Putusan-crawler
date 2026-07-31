@@ -1,343 +1,126 @@
-# Run from local VS Code on a RunPod GPU machine
+# Run the three-model SFT workflow on RunPod
 
-The recommended arrangement is:
+Use a persistent volume mounted at `/workspace`; Pod container storage is
+erased on Stop. Keep the repository, virtual environment, Hugging Face cache,
+outputs, and W&B cache on that volume.
 
-~~~text
-VS Code user interface: local Windows machine
-Repository + Python + terminal + GPUs: RunPod
-Connection: VS Code Remote - SSH
-~~~
+## Prepare the remote workspace
 
-There is no safe project setting that changes every ordinary **python
-main.py** command in a local shell into an SSH command. Instead, open the
-repository as a remote workspace. VS Code still runs on the local computer,
-but every new integrated terminal in that window runs on RunPod automatically.
+```bash
+cd /workspace
+git clone YOUR_REPOSITORY_URL Sinergi
+cd Sinergi
 
-## 1. Create the Pod
+cp trainer/sft/.env.example trainer/sft/.env
+chmod 600 trainer/sft/.env
+```
 
-Create a RunPod Pod with:
+Edit the ignored `.env` with:
 
-- two A100 80GB GPUs;
-- the RunPod PyTorch template;
-- a persistent network volume mounted at **/workspace**;
-- a public IP and exposed TCP port 22 for full SSH support.
+```dotenv
+HF_TOKEN=...
+WANDB_API_KEY=...
+HF_HOME=/workspace/.cache/huggingface
+```
 
-The volume matters more than it first appears: container storage is erased on
-every **Stop**, not only when a Pod is replaced. Keep the repository, the
-environment, and the model caches on **/workspace**. See section 8.
+The Hugging Face account must have access to the gated
+`meta-llama/Llama-3.2-3B-Instruct` repository.
 
-## 2. Configure SSH on the local machine
+## Download and validate
 
-Create an Ed25519 key if needed:
-
-~~~powershell
-ssh-keygen -t ed25519
-~~~
-
-Add the complete contents of **~/.ssh/id_ed25519.pub**, including the
-**ssh-ed25519** prefix, to RunPod account settings. RunPod injects account keys
-when the Pod is **created**; a key added afterwards is not in the running Pod's
-authorized_keys until it is recreated.
-
-### Load the key into the Windows ssh-agent
-
-Do this before configuring the host. Without an agent, a passphrase-protected
-key is re-prompted on every connection, and Remote-SSH opens several per
-session. The service ships **Disabled** on Windows, so it must be enabled once
-from an **Administrator** PowerShell:
-
-~~~powershell
-Set-Service ssh-agent -StartupType Automatic
-Start-Service ssh-agent
-ssh-add $env:USERPROFILE\.ssh\id_ed25519
-~~~
-
-The Windows agent stores the key encrypted in the registry, so the passphrase
-survives reboots — `ssh-add` is a one-time cost, not a per-session one. Use the
-Windows OpenSSH agent specifically: VS Code drives
-`C:\Windows\System32\OpenSSH\ssh.exe`, which does not see a Git Bash agent
-started with `eval $(ssh-agent)`.
-
-A denial that reads `Server accepts key: ...` immediately followed by
-`Permission denied` is this problem, not an authorization problem — the key was
-recognised, but signing needed a passphrase nobody could supply.
-
-### Choose a connection form
-
-The Pod's Connect page offers two, and the choice matters across restarts:
-
-| | Basic SSH (proxy) | SSH over exposed TCP |
-|---|---|---|
-| Address | `ssh.runpod.io`, fixed | public IP + port |
-| Survives Stop/Start | yes | **no** — both change |
-| SCP / SFTP | not supported | supported |
-
-Prefer the **proxy**: the login is `<pod-id>-<key-hash>`, and because the Pod ID
-survives a Stop, the entry below is written once and never edited. The exposed
-TCP address changes on every restart.
-
-~~~sshconfig
-Host sinergi-runpod
-    HostName ssh.runpod.io
-    User 5eq6h6kbg5biu0-64410abb
-    IdentityFile ~/.ssh/id_ed25519
-    ServerAliveInterval 30
-    ServerAliveCountMax 6
-~~~
-
-Take the exact `User` from the Connect page's SSH command — it is the Pod ID
-plus a hash of the key, not the bare Pod ID. It changes only if the Pod is
-recreated or the key changes.
-
-`ServerAliveInterval` keeps the session from dropping during the long silences
-between training log lines.
-
-**Fallback.** RunPod documents no SCP/SFTP over the proxy. Remote-SSH installs
-its server over an exec channel rather than SCP and is expected to work, but if
-it stalls while "installing the VS Code Server", switch to exposed TCP and
-update `HostName`/`Port` from the Connect page after each restart:
-
-~~~sshconfig
-Host sinergi-runpod
-    HostName 157.157.221.29
-    User root
-    Port 15236
-    IdentityFile ~/.ssh/id_ed25519
-    ServerAliveInterval 30
-    ServerAliveCountMax 6
-~~~
-
-Verify either form from a local PowerShell terminal:
-
-~~~powershell
-ssh sinergi-runpod
-~~~
-
-## 3. Open the remote repository in VS Code
-
-1. Install the Microsoft **Remote - SSH** extension locally.
-2. Run **Remote-SSH: Connect to Host...** and choose **sinergi-runpod**.
-3. In the new remote window, open a terminal and clone the repository onto the
-   persistent volume:
-
-   ~~~bash
-   cd /workspace
-   git clone YOUR_REPOSITORY_URL Sinergi
-   ~~~
-
-   Cloning under **/workspace** is required, not stylistic: everything outside
-   it is erased on Stop. See section 8.
-
-4. Open the folder with **File > Open Folder > /workspace/Sinergi**. Do not run
-   `code .` here — inside an already-remote window it opens a redundant second
-   window.
-5. Check the lower-left VS Code status bar says **SSH: sinergi-runpod**.
-6. Open **Terminal > New Terminal** and verify:
-
-   ~~~bash
-   hostname
-   pwd
-   nvidia-smi
-   ~~~
-
-At this point the editor window is displayed locally, but its files, Python
-extensions, debugger, and integrated terminals run on RunPod. Opening a local
-Sinergi window and opening a RunPod window are different; always check the
-lower-left SSH indicator before starting an expensive job.
-
-## 4. Download the weights
-
-Redirect the caches onto the volume **first** — see section 8. The downloader
-refuses to run without `HF_HOME`, because the weights would otherwise land on
-the container disk and be wiped by the next Stop.
-
-~~~bash
-cd /workspace/Sinergi
-export HF_HOME=/workspace/.cache/huggingface
+```bash
 bash trainer/sft/download_model.sh
-~~~
-
-This fetches **Qwen/Qwen3.5-4B** (~9.3 GB) and prints the path it used. There is
-no pre-quantized 4-bit repo for this model, so the full bf16 checkpoint is
-downloaded once and quantized at load time. It runs on a throwaway uv
-environment, so it works before the GPU stack exists.
-
-Every 15 seconds it reports the bytes actually on disk:
-
-~~~text
-   0.46 / 9.34 GB (  4.9%) at   6.1 MB/s, ~24 min left
-~~~
-
-That line is measured from the cache directory rather than taken from a progress
-bar, so it keeps moving in a logged or piped run where a redrawing bar would
-look frozen. If it stops advancing, the transfer really is stuck.
-
-The script forces `HF_HUB_DISABLE_XET=1`. The Xet transport stalled part-way
-through this repo, measured slower than plain HTTP, and emitted no progress of
-its own — the combination is what made the download look hung.
-
-## 5. Install the GPU environment
-
-In the remote terminal:
-
-~~~bash
-cd /workspace/Sinergi
 bash trainer/sft/setup_runpod.sh
 source .venv/bin/activate
-~~~
+```
 
-The setup follows the pinned versions from the original notebook. Run it once
-per persistent environment, not before every training run.
+The downloader caches Qwen 3.5 4B, Gemma 4 E2B IT, and Llama 3.2 3B Instruct.
+Setup installs the compatible GPU stack and ends with:
 
-Its last step loads the cached weights in 4-bit once. That pays for the silent
-Unsloth import and its Triton kernel compile here, and fails fast if the
-checkpoint cannot be quantized on this GPU — before you spend GPU time getting
-three stages into a training run. Note that bitsandbytes re-quantizes on every
-load, so this warms the caches; it does not write a 4-bit checkpoint to disk.
+```bash
+python -m trainer.sft.preflight --deep
+```
 
-## 6. Authenticate without committing secrets
+That test validates package versions, credentials, access to all model repos,
+the real dataset schema, chat-template response markers, W&B authentication,
+GPU availability, 4-bit loading, LoRA placement, frozen multimodal towers,
+tokenization, and a finite forward loss for every model. Training does not
+begin if any check fails.
 
-Set credentials through RunPod Secrets/environment variables or export them
-only in the remote shell:
+## Train all models
 
-~~~bash
-export HF_TOKEN="..."
-export WANDB_API_KEY="..."
-wandb login
-~~~
+Use `tmux` for an unattended job:
 
-Do not put either token in Python, Git, **.vscode**, or a committed **.env**.
-The default W&B project is **putusan-sft**.
-
-## 7. Run the complete job
-
-Confirm the hardware profile first — see section 9. The shortest command is:
-
-~~~bash
+```bash
+tmux new -s putusan-sft
 cd /workspace/Sinergi
 source .venv/bin/activate
-cd trainer/sft
-python main.py
-~~~
+python -m trainer.sft.run_all --wandb-run-prefix run-001
+```
 
-**main.py** sees that it is not under DDP and automatically relaunches itself
-with two workers. It then runs these stages:
+The production default is one complete epoch. Do not pass `--max-steps`
+unless intentionally limiting a smoke/debug run.
 
-1. validate the two A100 80GB GPUs and DDP ranks;
-2. initialize W&B;
-3. load Qwen and attach LoRA;
-4. load and format the datasets;
-5. measure/select context length;
-6. create the response-only trainer;
-7. train and evaluate;
-8. save the adapter locally;
-9. upload the adapter directory as a versioned W&B model artifact;
-10. wait for upload completion and finish the W&B run.
+Detach with `Ctrl+B`, then `D`; reattach with:
 
-Equivalent repository-root command:
+```bash
+tmux attach -t putusan-sft
+```
 
-~~~bash
-python trainer/sft/main.py \
-  --max-steps 100 \
-  --wandb-project putusan-sft \
-  --wandb-artifact-name qwen-extractor-sft-lora
-~~~
+The runner performs the deep preflight again by default, then starts Qwen,
+Gemma, and Llama in isolated processes. If a model fails, the command exits
+immediately and does not start later models. Fix the problem and rerun.
 
-You can also run **Terminal > Run Task > SFT: Train on connected RunPod**.
-That task uses the remote workspace's **.venv**; it does not establish SSH by
-itself.
+At startup, each model scans every version in its own W&B checkpoint
+collection. Only artifacts whose base model, dataset, and dataset config match
+the current job are eligible. The workflow compares the highest compatible
+W&B step with the highest complete local step, downloads W&B atomically when
+it is newer, and resumes Trainer automatically. This also restores training
+after the persistent volume is lost; no manual W&B download or directory
+copying is required.
 
-For a long unattended run, use **tmux** so an SSH interruption does not stop it:
+To deliberately prevent remote restore for one invocation:
 
-~~~bash
-tmux new -s putusan-sft
-cd /workspace/Sinergi/trainer/sft
-source ../../.venv/bin/activate
-python main.py
-# Detach with Ctrl+B, then D. Reattach with: tmux attach -t putusan-sft
-~~~
+```bash
+python -m trainer.sft.run_all --no-wandb-resume
+```
 
-## 8. Persistence across Stop
+For a one-step integration run:
 
-**Stop** releases the GPUs, keeps the Pod ID, preserves the volume disk
-(**/workspace**), and **erases the container disk** — everything else, including
-**/root**. **Terminate** deletes the Pod outright and keeps nothing but a
-network volume. Volume storage is billed while stopped.
+```bash
+python -m trainer.sft.run_all \
+  --max-steps 1 \
+  --eval-steps 1 \
+  --save-steps 1 \
+  --wandb-run-prefix smoke
+```
 
-The container-disk wipe silently defeats any cache under **/root**. Redirect the
-caches onto the volume, once, by appending to **~/.bashrc** on the Pod:
+## Persistent outputs
 
-~~~bash
+Each model uses:
+
+```text
+outputs/sft/<model-slug>/
+├── cache/token_lengths.npy
+├── checkpoints/checkpoint-N/
+└── lora/
+```
+
+W&B names use the same slug:
+
+- `<slug>-checkpoint`, aliases `latest` and `step-N`
+- `<slug>-lora`, alias `latest`
+- `<slug>-token-lengths`, alias `latest`
+
+Training saves LoRA adapters only. It never merges with the base weights and
+never uploads to Hugging Face automatically.
+
+Recommended persistent shell settings:
+
+```bash
 export HF_HOME=/workspace/.cache/huggingface
 export WANDB_CACHE_DIR=/workspace/.cache/wandb
-~~~
+```
 
-**HF_HOME** is the one that pays for itself. Its default is
-**~/.cache/huggingface**, on the container disk, so without this the Qwen base
-model and the dataset re-download after every single Stop. Nothing reports an
-error; the run just starts slowly.
-
-Already safe, because they resolve under the repo on the volume:
-
-- **.venv** — so section 5 is once per Pod, not once per restart
-- **outputs/sft/cache** — the cached token-length measurement
-- **outputs/sft/checkpoints/**, **qwen_extractor_sft_lora/**
-
-`setup_runpod.sh` installs **uv** into **$HOME/.local/bin**, on the container
-disk, so `uv` vanishes on Stop. Harmless: **.venv** persists and activates
-without it. Re-running the setup script simply reinstalls `uv` first.
-
-Shell exports vanish too. Keep **HF_TOKEN** and **WANDB_API_KEY** as RunPod
-Secrets to avoid re-exporting them each restart.
-
-### Resuming after a Stop
-
-1. Start the Pod, and confirm it actually got its GPUs (section 9).
-2. **Remote-SSH: Connect to Host > sinergi-runpod** — no config edit, if you
-   used the proxy form.
-3. `cd /workspace/Sinergi && git pull`
-4. tmux, activate **.venv**, `python main.py`.
-
-## 9. Hardware profile
-
-`validate_hardware` enforces the two-A100 profile and aborts at stage 1 of 11,
-before any training work:
-
-- exactly **2** DDP workers — `main.py` relaunches itself with
-  `required_gpu_count`, and a different `WORLD_SIZE` is rejected;
-- every device name must contain **A100**;
-- every device needs at least **78 GiB**.
-
-Check after each restart, because RunPod **may allocate zero GPUs** on restart
-if capacity has shifted — a failed restart is a capacity problem, not a bug:
-
-~~~bash
-nvidia-smi --query-gpu=name,memory.total --format=csv
-~~~
-
-- Two A100 80GB: proceed.
-- Right count, wrong model (2x A40, 2x H100): add **--allow-non-a100**, which
-  skips the name and VRAM checks but still requires CUDA. An H100 Pod passes the
-  count check and fails the name check without it.
-- Not exactly two GPUs: **--allow-non-a100 does not help** — the worker count is
-  a separate check. Resize the Pod, or change `required_gpu_count` /
-  `require_distributed_launch` in **config.py**.
-
-## Outputs
-
-- Local/volume adapter: **qwen_extractor_sft_lora/**
-- Trainer checkpoints: **outputs/sft/checkpoints/**
-- W&B metrics: project **putusan-sft**
-- W&B model artifact: **qwen-extractor-sft-lora:latest**
-
-Training returns success only after the W&B artifact upload completes.
-
-## Official references
-
-- [RunPod SSH connections](https://docs.runpod.io/pods/configuration/use-ssh)
-- [RunPod manage Pods: stop vs terminate](https://docs.runpod.io/pods/manage-pods)
-- [RunPod storage types](https://docs.runpod.io/pods/storage/types)
-- [VS Code Remote - SSH](https://code.visualstudio.com/docs/remote/ssh)
-- [Windows OpenSSH key management](https://learn.microsoft.com/windows-server/administration/openssh/openssh_keymanagement)
-- [W&B model artifacts](https://docs.wandb.ai/models/artifacts/construct-an-artifact)
-
+Do not commit `.env`, model weights, checkpoints, adapters, downloaded data,
+browser profiles, or W&B logs.

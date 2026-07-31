@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+from argparse import Namespace
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+from trainer.sft.config import MODEL_PROFILES
+from trainer.sft.preflight import infer_modalities
+from trainer.sft.run_all import build_training_command
+from trainer.sft.transformer import load_base_model, verify_non_text_modules_frozen
+
+
+def runner_args(**overrides) -> Namespace:
+    values = {
+        "dataset": "Haeryz/putusan-structured-extraction",
+        "dataset_config": "sft",
+        "num_train_epochs": 1.0,
+        "max_steps": None,
+        "eval_steps": 10,
+        "save_steps": 5,
+        "gpu_count": 1,
+        "per_device_batch_size": 1,
+        "gradient_accumulation_steps": 8,
+        "wandb_project": "putusan-sft",
+        "wandb_entity": None,
+        "wandb_run_prefix": "trial",
+        "allow_non_a100": False,
+        "no_wandb_upload": False,
+        "no_wandb_resume": False,
+    }
+    values.update(overrides)
+    return Namespace(**values)
+
+
+def test_sequential_commands_select_each_profile_and_unique_run_name() -> None:
+    commands = {
+        key: build_training_command(key, runner_args())
+        for key in ("qwen", "gemma", "llama")
+    }
+
+    for key, command in commands.items():
+        assert command[command.index("--model") + 1] == key
+        assert command[command.index("--num-train-epochs") + 1] == "1.0"
+        assert "--max-steps" not in command
+    assert commands["qwen"][-1] == "trial-qwen3-5-4b"
+    assert commands["gemma"][-1] == "trial-gemma-4-e2b"
+    assert commands["llama"][-1] == "trial-llama-3-2-3b"
+
+
+def test_hub_config_modality_inference_distinguishes_three_architectures() -> None:
+    assert infer_modalities({"text_config": {}, "vision_config": {}}) == {
+        "text", "image", "video"
+    }
+    assert infer_modalities(
+        {"text_config": {}, "vision_config": {}, "audio_config": {}}
+    ) == {"text", "image", "audio", "video"}
+    assert infer_modalities({"model_type": "llama"}) == {"text"}
+
+
+def test_gemma_non_text_trainable_parameter_is_rejected() -> None:
+    model = SimpleNamespace(
+        named_parameters=lambda: iter([
+            (
+                "model.vision_tower.encoder.layers.0.lora_A.weight",
+                SimpleNamespace(requires_grad=True),
+            )
+        ])
+    )
+
+    with pytest.raises(RuntimeError, match="trainable non-text"):
+        verify_non_text_modules_frozen(model, MODEL_PROFILES["gemma"])
+
+
+def test_language_only_trainable_parameters_are_allowed() -> None:
+    model = SimpleNamespace(
+        named_parameters=lambda: iter([
+            (
+                "model.language_model.layers.0.self_attn.q_proj.lora_A.weight",
+                SimpleNamespace(requires_grad=True),
+            ),
+            (
+                "model.audio_tower.encoder.weight",
+                SimpleNamespace(requires_grad=False),
+            ),
+        ])
+    )
+
+    verify_non_text_modules_frozen(model, MODEL_PROFILES["gemma"])
+
+
+def test_gemma_uses_fast_model_without_qwen_text_only_flag(monkeypatch) -> None:
+    calls: dict[str, dict[str, object]] = {}
+
+    class FakeFastModel:
+        @staticmethod
+        def from_pretrained(**kwargs):
+            calls["fast_model"] = kwargs
+            return object(), object()
+
+    class FakeFastLanguageModel:
+        @staticmethod
+        def from_pretrained(**kwargs):
+            calls["language_model"] = kwargs
+            return object(), object()
+
+    monkeypatch.setitem(
+        sys.modules, "torch", SimpleNamespace(bfloat16="bf16")
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "unsloth",
+        SimpleNamespace(
+            FastModel=FakeFastModel,
+            FastLanguageModel=FakeFastLanguageModel,
+        ),
+    )
+
+    load_base_model(MODEL_PROFILES["gemma"])
+
+    assert calls["fast_model"]["model_name"] == "google/gemma-4-E2B-it"
+    assert "text_only" not in calls["fast_model"]
+    assert "language_model" not in calls
+
+
+def test_qwen_loader_explicitly_enables_text_only(monkeypatch) -> None:
+    calls: dict[str, dict[str, object]] = {}
+
+    class FakeFastLanguageModel:
+        @staticmethod
+        def from_pretrained(**kwargs):
+            calls["language_model"] = kwargs
+            return object(), object()
+
+    monkeypatch.setitem(
+        sys.modules, "torch", SimpleNamespace(bfloat16="bf16")
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "unsloth",
+        SimpleNamespace(
+            FastModel=object(),
+            FastLanguageModel=FakeFastLanguageModel,
+        ),
+    )
+
+    load_base_model(MODEL_PROFILES["qwen"])
+
+    assert calls["language_model"]["text_only"] is True

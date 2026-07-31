@@ -1,4 +1,4 @@
-"""Complete Qwen SFT job, from hardware validation through W&B upload.
+"""Complete model-profile SFT job, from validation through W&B upload.
 
 This file supports both package execution and the convenient RunPod command:
 
@@ -11,15 +11,18 @@ of local DDP workers.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 from typing import Any, Sequence
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from trainer.sft.checkpoint import save_adapter
+    from trainer.sft.checkpoint import latest_checkpoint, save_adapter
     from trainer.sft.config import RunConfig
     from trainer.sft.data import (
         choose_max_length,
@@ -30,10 +33,12 @@ if __package__ in {None, ""}:
         load_splits,
     )
     from trainer.sft.tracking import (
+        checkpoint_upload_callback,
         fetch_length_cache,
         finish_wandb,
         initialize_wandb,
         log_model_artifact,
+        restore_newest_wandb_checkpoint,
         upload_length_cache,
     )
     from trainer.sft.training import build_trainer
@@ -42,10 +47,9 @@ if __package__ in {None, ""}:
         distributed_world_size,
         load_base_model,
         validate_hardware,
-        verify_long_context_stack,
     )
 else:
-    from .checkpoint import save_adapter
+    from .checkpoint import latest_checkpoint, save_adapter
     from .config import RunConfig
     from .data import (
         choose_max_length,
@@ -56,10 +60,12 @@ else:
         load_splits,
     )
     from .tracking import (
+        checkpoint_upload_callback,
         fetch_length_cache,
         finish_wandb,
         initialize_wandb,
         log_model_artifact,
+        restore_newest_wandb_checkpoint,
         upload_length_cache,
     )
     from .training import build_trainer
@@ -68,7 +74,6 @@ else:
         distributed_world_size,
         load_base_model,
         validate_hardware,
-        verify_long_context_stack,
     )
 
 
@@ -79,6 +84,76 @@ def _is_rank_zero() -> bool:
 def _stage(number: int, total: int, message: str) -> None:
     if _is_rank_zero():
         print(f"\n[{number}/{total}] {message}", flush=True)
+
+
+def _restore_sync_marker(config: RunConfig) -> Path:
+    """Return a per-torchrun marker shared by every local worker."""
+
+    identity = os.environ.get("TORCHELASTIC_RUN_ID") or (
+        f"{os.environ.get('MASTER_ADDR', 'local')}:"
+        f"{os.environ.get('MASTER_PORT', 'single')}"
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+    return (
+        config.training.output_dir
+        / f".wandb-checkpoint-restore-{digest}.json"
+    )
+
+
+def synchronize_wandb_checkpoint_restore(
+    config: RunConfig, wandb_run: Any | None
+) -> None:
+    """Let rank zero restore W&B state before any worker selects a checkpoint."""
+
+    if not config.tracking.restore_checkpoints:
+        return
+    world_size = distributed_world_size()
+    if world_size == 1:
+        if wandb_run is None:
+            raise RuntimeError("Rank 0 has no active W&B run for checkpoint scan")
+        restore_newest_wandb_checkpoint(wandb_run, config)
+        return
+
+    marker = _restore_sync_marker(config)
+    if _is_rank_zero():
+        if wandb_run is None:
+            raise RuntimeError("Rank 0 has no active W&B run for checkpoint scan")
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        temporary = marker.with_suffix(".tmp")
+        try:
+            restored = restore_newest_wandb_checkpoint(wandb_run, config)
+            payload = {
+                "ok": True,
+                "checkpoint": str(restored) if restored is not None else None,
+            }
+        except BaseException as error:
+            payload = {
+                "ok": False,
+                "error": f"{type(error).__name__}: {error}",
+            }
+            temporary.write_text(json.dumps(payload), encoding="utf-8")
+            os.replace(temporary, marker)
+            raise
+        temporary.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(temporary, marker)
+        return
+
+    deadline = time.monotonic() + config.tracking.restore_timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            time.sleep(1)
+            continue
+        if not payload.get("ok"):
+            raise RuntimeError(
+                "Rank 0 failed automatic W&B checkpoint restore: "
+                f"{payload.get('error', 'unknown error')}"
+            )
+        return
+    raise TimeoutError(
+        f"Timed out waiting for rank 0 W&B restore marker {marker}"
+    )
 
 
 def distributed_launch_command(
@@ -123,7 +198,7 @@ def launch_distributed(argv: Sequence[str], gpu_count: int) -> int:
 def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
     """Run every modular stage and upload the final adapter to W&B."""
 
-    total_stages = 11
+    total_stages = 12
     wandb_run: Any | None = None
     try:
         _stage(
@@ -137,21 +212,37 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
         if _is_rank_zero():
             wandb_run = initialize_wandb(config)
 
-        _stage(3, total_stages, "Load text-only 4-bit Qwen base model")
+        _stage(
+            3,
+            total_stages,
+            "Scan W&B and restore the newest compatible checkpoint",
+        )
+        synchronize_wandb_checkpoint_restore(config, wandb_run)
+
+        _stage(
+            4,
+            total_stages,
+            f"Load {config.model.model_name} in 4-bit",
+        )
         model, tokenizer = load_base_model(config.model)
 
-        _stage(4, total_stages, "Verify long-context patches and attach LoRA")
-        verify_long_context_stack(model)
+        _stage(5, total_stages, "Verify long-context patches and attach LoRA")
         model = attach_lora(model, config.model)
 
-        _stage(5, total_stages, "Load train and validation datasets")
+        _stage(6, total_stages, "Load train and validation datasets")
         train_dataset, eval_dataset = load_splits(config.data)
 
-        _stage(6, total_stages, "Apply Qwen chat template")
-        train_dataset = format_dataset(train_dataset, tokenizer)
-        eval_dataset = format_dataset(eval_dataset, tokenizer)
+        _stage(
+            7,
+            total_stages,
+            f"Apply {config.model.profile_name} chat template",
+        )
+        train_dataset = format_dataset(
+            train_dataset, tokenizer, config.model
+        )
+        eval_dataset = format_dataset(eval_dataset, tokenizer, config.model)
 
-        _stage(7, total_stages, "Measure token lengths and select context")
+        _stage(8, total_stages, "Measure token lengths and select context")
         cache_path = length_cache_path(config.data)
         reuse_cache = (
             _is_rank_zero()
@@ -203,7 +294,7 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
                 f"= {config.training.effective_batch_size(world_size)}"
             )
 
-        _stage(8, total_stages, "Build response-only SFT trainer")
+        _stage(9, total_stages, "Build response-only SFT trainer")
         trainer = build_trainer(
             model,
             tokenizer,
@@ -211,29 +302,56 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
             eval_dataset,
             profile.max_length,
             config.training,
+            config.model,
         )
 
-        _stage(9, total_stages, "Train and evaluate")
-        trainer_stats = trainer.train()
+        artifact_metadata = {
+            "base_model": config.model.model_name,
+            "dataset": config.data.repository,
+            "dataset_config": config.data.subset,
+            "max_length": profile.max_length,
+            "effective_batch_size": config.training.effective_batch_size(
+                world_size
+            ),
+            "num_train_epochs": config.training.num_train_epochs,
+            "max_steps": config.training.max_steps,
+        }
+        if (
+            trainer.is_world_process_zero()
+            and config.tracking.upload_checkpoints
+        ):
+            if wandb_run is None:
+                raise RuntimeError("Rank 0 has no active W&B run")
+            trainer.add_callback(
+                checkpoint_upload_callback(
+                    wandb_run,
+                    config.tracking,
+                    artifact_metadata,
+                )
+            )
 
-        _stage(10, total_stages, "Save LoRA adapter locally")
+        resume_checkpoint = latest_checkpoint(config.training.output_dir)
+        if trainer.is_world_process_zero() and resume_checkpoint is not None:
+            print(f"Resuming from {resume_checkpoint}.", flush=True)
+
+        _stage(10, total_stages, "Train and evaluate")
+        trainer_stats = trainer.train(
+            resume_from_checkpoint=(
+                str(resume_checkpoint) if resume_checkpoint is not None else None
+            )
+        )
+
+        _stage(11, total_stages, "Save LoRA adapter locally")
         if trainer.is_world_process_zero():
             save_adapter(model, tokenizer, config.training.adapter_dir)
 
-        _stage(11, total_stages, "Upload LoRA adapter as W&B model artifact")
+        _stage(12, total_stages, "Upload LoRA adapter as W&B model artifact")
         if trainer.is_world_process_zero() and config.tracking.upload_adapter:
             if wandb_run is None:
                 raise RuntimeError("Rank 0 has no active W&B run")
             metrics = dict(getattr(trainer_stats, "metrics", {}))
             metadata = {
-                "base_model": config.model.model_name,
-                "dataset": config.data.repository,
-                "dataset_config": config.data.subset,
-                "max_length": profile.max_length,
-                "effective_batch_size": config.training.effective_batch_size(
-                    world_size
-                ),
-                "max_steps": config.training.max_steps,
+                **artifact_metadata,
                 **metrics,
             }
             logged = log_model_artifact(

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from trainer.sft.config import DataConfig
+from trainer.sft.config import DataConfig, MODEL_PROFILES
 from trainer.sft.data import (
     choose_max_length,
     format_messages,
@@ -61,9 +61,35 @@ def test_format_messages_renders_each_conversation() -> None:
         ]
     }
 
-    assert format_messages(examples, FakeTokenizer()) == {
+    assert format_messages(examples, FakeTokenizer(), MODEL_PROFILES["qwen"]) == {
         "text": ["one", "extract|two"]
     }
+
+
+def test_format_messages_rejects_multimodal_content_blocks() -> None:
+    examples = {
+        "messages": [[{
+            "role": "user",
+            "content": [{"type": "image", "url": "example.png"}],
+        }]]
+    }
+
+    with pytest.raises(ValueError, match="text-only"):
+        format_messages(examples, FakeTokenizer(), MODEL_PROFILES["gemma"])
+
+
+def test_gemma_formatting_removes_processor_bos() -> None:
+    class BosTokenizer(FakeTokenizer):
+        def apply_chat_template(self, *args, **kwargs):
+            return "<bos><|turn>user\nhello<|turn|>\n"
+
+    result = format_messages(
+        {"messages": [[{"role": "user", "content": "hello"}]]},
+        BosTokenizer(),
+        MODEL_PROFILES["gemma"],
+    )
+
+    assert result["text"] == ["<|turn>user\nhello<|turn|>\n"]
 
 
 def test_measure_token_lengths_batches_without_special_tokens() -> None:

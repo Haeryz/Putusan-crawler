@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .config import TrainingConfig
+from .config import ModelConfig, TrainingConfig
 from .data import get_text_tokenizer
 
 
@@ -16,6 +16,7 @@ def build_trainer(
     eval_dataset: Any,
     max_length: int,
     config: TrainingConfig,
+    model_config: ModelConfig,
 ) -> Any:
     """Create the notebook-equivalent trainer and mask prompt tokens."""
 
@@ -27,7 +28,7 @@ def build_trainer(
     FastLanguageModel.for_training(model)
     trainer = SFTTrainer(
         model=model,
-        tokenizer=get_text_tokenizer(tokenizer_or_processor),
+        processing_class=get_text_tokenizer(tokenizer_or_processor),
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         args=SFTConfig(
@@ -35,6 +36,7 @@ def build_trainer(
             per_device_train_batch_size=config.per_device_train_batch_size,
             gradient_accumulation_steps=config.gradient_accumulation_steps,
             warmup_steps=config.warmup_steps,
+            num_train_epochs=config.num_train_epochs,
             max_steps=config.max_steps,
             learning_rate=config.learning_rate,
             logging_steps=config.logging_steps,
@@ -51,6 +53,9 @@ def build_trainer(
             fp16=False,
             eval_strategy="steps",
             eval_steps=config.eval_steps,
+            save_strategy="steps",
+            save_steps=config.save_steps,
+            save_only_model=False,
             per_device_eval_batch_size=1,
             prediction_loss_only=True,
             tf32=True,
@@ -68,8 +73,8 @@ def build_trainer(
     )
     trainer = train_on_responses_only(
         trainer,
-        instruction_part="<|im_start|>user\n",
-        response_part="<|im_start|>assistant\n",
+        instruction_part=model_config.instruction_part,
+        response_part=model_config.response_part,
     )
 
     train_retention = len(trainer.train_dataset) / len(train_dataset)

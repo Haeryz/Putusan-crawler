@@ -1,16 +1,32 @@
-"""Typed configuration for the whole-document SFT workflow."""
+"""Typed configuration and supported-model profiles for SFT."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
+
+
+LoaderKind = Literal["fast_language_model", "fast_model"]
+LoraKind = Literal["language_peft", "multimodal_language_only"]
 
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """Qwen/Unsloth model, LoRA, and GPU hardware settings."""
+    """One model's architecture, text-only policy, LoRA, and hardware settings."""
 
+    profile_name: str = "qwen"
     model_name: str = "Qwen/Qwen3.5-4B"
+    architecture: str = "Qwen3_5ForConditionalGeneration"
+    input_modalities: tuple[str, ...] = ("text", "image", "video")
+    loader_kind: LoaderKind = "fast_language_model"
+    lora_kind: LoraKind = "language_peft"
+    instruction_part: str = "<|im_start|>user\n"
+    response_part: str = "<|im_start|>assistant\n"
+    strip_bos_from_formatted_text: bool = False
+    require_linear_attention_lora: bool = True
+    require_tiled_mlp: bool = True
+    non_text_module_fragments: tuple[str, ...] = ("visual", "vision")
     max_seq_length: int = 49_152
     load_in_4bit: bool = True
     lora_rank: int = 32
@@ -19,6 +35,75 @@ class ModelConfig:
     required_gpu_count: int = 1
     minimum_vram_gb: float = 78.0
     require_distributed_launch: bool = False
+
+    @property
+    def slug(self) -> str:
+        return {
+            "qwen": "qwen3-5-4b",
+            "gemma": "gemma-4-e2b",
+            "llama": "llama-3-2-3b",
+        }[self.profile_name]
+
+
+MODEL_ORDER: tuple[str, ...] = ("qwen", "gemma", "llama")
+
+MODEL_PROFILES: dict[str, ModelConfig] = {
+    "qwen": ModelConfig(),
+    "gemma": ModelConfig(
+        profile_name="gemma",
+        model_name="google/gemma-4-E2B-it",
+        architecture="Gemma4ForConditionalGeneration",
+        input_modalities=("text", "image", "audio", "video"),
+        loader_kind="fast_model",
+        lora_kind="multimodal_language_only",
+        instruction_part="<|turn>user\n",
+        response_part="<|turn>model\n",
+        strip_bos_from_formatted_text=True,
+        require_linear_attention_lora=False,
+        require_tiled_mlp=False,
+        non_text_module_fragments=(
+            "vision_tower",
+            "audio_tower",
+            "multi_modal_projector",
+            "multimodal_projector",
+        ),
+    ),
+    "llama": ModelConfig(
+        profile_name="llama",
+        model_name="meta-llama/Llama-3.2-3B-Instruct",
+        architecture="LlamaForCausalLM",
+        input_modalities=("text",),
+        instruction_part=(
+            "<|start_header_id|>user<|end_header_id|>\n\n"
+        ),
+        response_part=(
+            "<|start_header_id|>assistant<|end_header_id|>\n\n"
+        ),
+        require_linear_attention_lora=False,
+        require_tiled_mlp=False,
+        non_text_module_fragments=(),
+    ),
+}
+
+_MODEL_ALIASES = {
+    key: key for key in MODEL_ORDER
+} | {
+    config.model_name: key for key, config in MODEL_PROFILES.items()
+}
+
+
+def model_config_for(name_or_repository: str) -> ModelConfig:
+    """Resolve a supported profile key or exact Hugging Face repository."""
+
+    try:
+        return MODEL_PROFILES[_MODEL_ALIASES[name_or_repository]]
+    except KeyError as error:
+        supported = ", ".join(
+            config.model_name for config in MODEL_PROFILES.values()
+        )
+        raise ValueError(
+            f"Unsupported model {name_or_repository!r}; choose one of: {supported}"
+        ) from error
 
 
 @dataclass(frozen=True)
@@ -34,23 +119,25 @@ class DataConfig:
     length_multiple: int = 256
     tokenization_batch_size: int = 256
     minimum_context_coverage: float = 0.94
-    cache_dir: Path = Path("outputs/sft/cache")
+    cache_dir: Path = Path("outputs/sft/qwen3-5-4b/cache")
     distributed_cache_timeout_seconds: int = 3_600
 
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    """TRL settings for the short single-A100 validation experiment."""
+    """TRL settings for one complete fine-tuning epoch."""
 
-    output_dir: Path = Path("outputs/sft/checkpoints")
-    adapter_dir: Path = Path("qwen_extractor_sft_lora")
+    output_dir: Path = Path("outputs/sft/qwen3-5-4b/checkpoints")
+    adapter_dir: Path = Path("outputs/sft/qwen3-5-4b/lora")
     per_device_train_batch_size: int = 1
     gradient_accumulation_steps: int = 8
     warmup_steps: int = 5
-    max_steps: int = 30
+    num_train_epochs: float = 1.0
+    max_steps: int = -1
     learning_rate: float = 2e-4
     logging_steps: int = 1
     eval_steps: int = 10
+    save_steps: int = 5
     weight_decay: float = 0.001
     seed: int = 3407
     report_to: str = "wandb"
@@ -77,12 +164,17 @@ class TrackingConfig:
     project: str = "putusan-sft"
     entity: str | None = None
     run_name: str | None = None
-    artifact_name: str = "qwen-extractor-sft-lora"
+    artifact_name: str = "qwen3-5-4b-lora"
     artifact_type: str = "model"
     artifact_aliases: tuple[str, ...] = ("latest",)
     upload_adapter: bool = True
+    checkpoint_artifact_name: str = "qwen3-5-4b-checkpoint"
+    checkpoint_artifact_type: str = "model-checkpoint"
+    upload_checkpoints: bool = True
     upload_timeout_seconds: int = 3_600
-    length_cache_artifact_name: str = "sft-token-lengths"
+    restore_checkpoints: bool = True
+    restore_timeout_seconds: int = 3_600
+    length_cache_artifact_name: str = "qwen3-5-4b-token-lengths"
     length_cache_artifact_type: str = "dataset"
     reuse_length_cache: bool = True
 
@@ -95,3 +187,22 @@ class RunConfig:
     data: DataConfig = field(default_factory=DataConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
+
+
+def run_config_for_model(model: ModelConfig) -> RunConfig:
+    """Build isolated local and W&B paths for one supported model."""
+
+    slug = model.slug
+    return RunConfig(
+        model=model,
+        data=DataConfig(cache_dir=Path(f"outputs/sft/{slug}/cache")),
+        training=TrainingConfig(
+            output_dir=Path(f"outputs/sft/{slug}/checkpoints"),
+            adapter_dir=Path(f"outputs/sft/{slug}/lora"),
+        ),
+        tracking=TrackingConfig(
+            artifact_name=f"{slug}-lora",
+            checkpoint_artifact_name=f"{slug}-checkpoint",
+            length_cache_artifact_name=f"{slug}-token-lengths",
+        ),
+    )
