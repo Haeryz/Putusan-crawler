@@ -1,4 +1,4 @@
-# Run the three-model SFT workflow on RunPod
+# Run the Gemma and DeepSeek SFT workflow on RunPod
 
 Use a persistent volume mounted at `/workspace`; Pod container storage is
 erased on Stop. Keep the repository, virtual environment, Hugging Face cache,
@@ -31,8 +31,7 @@ bash trainer/sft/setup_runpod.sh
 source .venv/bin/activate
 ```
 
-The downloader caches Qwen 3.5 4B, Gemma 4 E2B IT, and DeepSeek R1 Distill
-Qwen 1.5B.
+The downloader caches Gemma 4 E2B IT and DeepSeek R1 Distill Qwen 1.5B.
 Setup installs the compatible GPU stack and ends with:
 
 ```bash
@@ -53,13 +52,13 @@ The SFT workflow is text-only, so setup intentionally omits the optional
 write its completion marker; rerunning safely reuses the partially created
 `.venv` and completes the remaining installation.
 
-That test validates package versions, credentials, access to all model repos,
+That test validates package versions, credentials, access to both model repos,
 the real dataset schema, chat-template response markers, W&B authentication,
 GPU availability, 4-bit loading, LoRA placement, frozen multimodal towers,
-tokenization, and a finite forward loss for every model. Training does not
+tokenization, and a finite forward loss for both models. Training does not
 begin if any check fails.
 
-## Train all models
+## Train both outstanding models
 
 Use `tmux` for an unattended job:
 
@@ -72,12 +71,17 @@ python -m trainer.sft.run_all --wandb-run-prefix run-001
 
 The production default is one complete epoch. Do not pass `--max-steps`
 unless intentionally limiting a smoke/debug run.
-The default cadence is `--eval-steps 38 --save-steps 50`. Token-length caches
-can be prepared before renting the pod with:
+The default cadence is `--eval-steps 38 --save-steps 50`. Build and upload the
+fully tokenized, response-masked train/validation datasets locally before
+renting the pod:
 
 ```bash
-python -m trainer.sft.precompute_lengths
+python -m trainer.sft.precompute_dataset
 ```
+
+The pod then restores model-specific prepared artifacts from W&B and skips all
+dataset tokenization. If the startup log says `falling back to local
+preparation`, the prepared artifact was not found or did not match the model.
 
 Detach with `Ctrl+B`, then `D`; reattach with:
 
@@ -85,8 +89,8 @@ Detach with `Ctrl+B`, then `D`; reattach with:
 tmux attach -t putusan-sft
 ```
 
-The runner performs the deep preflight again by default, then starts Qwen,
-Gemma, and DeepSeek in isolated processes. If a model fails, the command exits
+The runner performs only the fast metadata/service preflight by default, then
+starts Gemma and DeepSeek in isolated processes. If a model fails, it exits
 immediately and does not start later models. Fix the problem and rerun.
 
 At startup, each model scans every version in its own W&B checkpoint
@@ -124,11 +128,16 @@ outputs/sft/<model-slug>/
 └── lora/
 ```
 
-W&B names use the same slug:
+For Gemma and DeepSeek, these directories are under an additional
+`section-sliced/` component and include `prepared-dataset/manifest.json` plus
+the saved Arrow dataset.
 
-- `<slug>-checkpoint`, aliases `latest` and `step-N`
-- `<slug>-lora`, alias `latest`
-- `<slug>-token-lengths`, alias `latest`
+W&B names use the section-sliced slug:
+
+- `<slug>-section-sliced-checkpoint`, aliases `latest` and `step-N`
+- `<slug>-section-sliced-lora`, alias `latest`
+- `<slug>-section-sliced-token-lengths`, alias `latest`
+- `<slug>-section-sliced-prepared-sft`, alias `latest`
 
 Training saves LoRA adapters only. It never merges with the base weights and
 never uploads to Hugging Face automatically.

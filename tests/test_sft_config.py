@@ -219,6 +219,8 @@ def test_trainer_saves_resumable_state_every_configured_steps(
     assert sft_config["num_train_epochs"] == 1.0
     assert sft_config["max_steps"] == -1
     assert sft_config["max_length"] == 256
+    assert sft_config["group_by_length"] is True
+    assert sft_config["auto_find_batch_size"] is True
     assert captured["trainer_kwargs"]["processing_class"].truncation_side == "right"
 
 
@@ -261,9 +263,20 @@ def test_cli_selects_gemma_profile_and_derived_paths() -> None:
     assert config.model.model_name == "google/gemma-4-E2B-it"
     assert config.model.loader_kind == "fast_model"
     assert config.training.output_dir.as_posix().endswith(
-        "gemma-4-e2b/checkpoints"
+        "gemma-4-e2b/section-sliced/checkpoints"
     )
-    assert config.tracking.artifact_name == "gemma-4-e2b-lora"
+    assert config.tracking.artifact_name == "gemma-4-e2b-section-sliced-lora"
+    assert config.model.max_seq_length == 8_192
+    assert config.training.per_device_train_batch_size == 17
+    assert config.training.gradient_accumulation_steps == 1
+
+
+def test_deepseek_profile_uses_larger_safe_section_microbatch() -> None:
+    config = config_from_args(build_parser().parse_args(["--model", "deepseek"]))
+
+    assert config.model.max_seq_length == 8_192
+    assert config.training.per_device_train_batch_size == 24
+    assert config.training.gradient_accumulation_steps == 1
 
 
 def test_two_worker_torchrun_environment_is_required_for_two_gpu_override() -> None:

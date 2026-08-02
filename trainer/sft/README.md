@@ -1,12 +1,12 @@
 # Multi-model putusan SFT
 
-This package fine-tunes three Hugging Face models in this fixed order:
+This package retains profiles for three Hugging Face models. Qwen training is
+complete, so the sequential runner trains only the outstanding models:
 
-1. `Qwen/Qwen3.5-4B`
-2. `google/gemma-4-E2B-it`
-3. `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B`
+1. `google/gemma-4-E2B-it`
+2. `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B`
 
-One command runs a deep preflight and then launches each model in a fresh
+One command runs a fast preflight and then launches each model in a fresh
 Python process:
 
 ```bash
@@ -62,9 +62,9 @@ python -m trainer.sft.preflight
 python -m trainer.sft.preflight --deep
 ```
 
-The all-model runner uses the deep check by default. Use
-`--quick-preflight` only when weights were already validated, or
-`--skip-preflight` when deliberately resuming without repeating it.
+The runner uses the fast metadata/service check by default so it does not load
+every model twice. Use `--deep-preflight` for a full forward smoke test, or
+`--skip-preflight` when deliberately resuming without repeating checks.
 
 Keep `HF_HOME` on persistent RunPod storage.
 
@@ -96,11 +96,29 @@ matching cache/checkpoint from `Sinergi-training`, trains only the selected
 model, saves its LoRA under `outputs/sft/<model-slug>/lora/`, waits for the
 `<model-slug>-lora:latest` W&B upload, and exits without merging.
 
-Formatted conversations are capped at the profile's 49,152-token context.
-Oversized rows are truncated from the middle of the user content. This keeps
-the instruction marker, the end of the source document, the assistant marker,
-and the supervised answer so Unsloth can retain the row for response-only
-training. Context coverage is reported but does not stop the run.
+For Gemma and DeepSeek, every whole-document row is expanded into the same 31
+per-section units used by the Qwen evaluation notebook. A unit contains only
+that section's gold source spans in `<span>` blocks and its one-section JSON
+answer. The measured reference artifact has combined prompt+gold p50 530, p95
+8,724, and 94.57% coverage at 8,192 tokens. Both profiles therefore use an
+8,192-token cap while selecting their tokenizer-specific p95 at runtime.
+
+Training has no persistent inference KV cache. Shorter units instead reduce
+attention/recurrent activations and padding. Batches are grouped by length.
+
+| Model | Micro-batch/GPU | Accumulation | Samples/step/GPU | Conservative peak |
+| --- | ---: | ---: | ---: | ---: |
+| Gemma 4 E2B | 17 | 1 | 17 | 69.91 GiB |
+| DeepSeek 1.5B | 24 | 1 | 24 | 68.77 GiB |
+
+The safe limit is 70.20 GiB: 90% of the minimum accepted 78 GiB device. The
+budget keeps embeddings and frozen modality towers in BF16, budgets remaining
+linear weights at 0.625 byte/parameter for NF4 metadata, adds 2 GiB for
+LoRA/gradients/8-bit Adam, every BF16 layer boundary times a 2.5
+forward/backward workspace factor, 4 GiB fused-loss workspace, 8 GiB runtime
+reserve, and then 25% headroom. Batch 18 for Gemma estimates 72.48 GiB and
+batch 25 for DeepSeek 70.83 GiB,
+so both are rejected. Automatic first-step batch fallback is also enabled.
 
 Typical unattended run:
 
@@ -145,30 +163,36 @@ the optimizer steps per epoch are approximately `S = ceil(N / (B*G*A))`.
 For `K` validations per epoch, use `eval_steps = floor(S/K)`. The fixed
 production default is 38; optional `--evaluations-per-epoch 4` resolves as:
 
-| Dataset config | 2 GPUs | 3 GPUs |
-| --- | ---: | ---: |
-| `sft` | 155 steps/epoch, evaluate every 38 | 103, every 25 |
-| `sft_sections` | 923 steps/epoch, evaluate every 230 | 616, every 154 |
+The exact cadence is resolved after the 31-way expansion because Gemma and
+DeepSeek use different micro-batches. Prefer `--evaluations-per-epoch 4` over
+a hard-coded interval.
 
 To enforce a wall-time budget after measuring one training step (`t_step`) and
 one complete validation (`T_eval`), compute `T_train = S*t_step`. If validation
 may consume at most fraction `f` of total runtime, the largest affordable count
 is `floor(f*T_train / ((1-f)*T_eval))`.
 
-### Precomputing token lengths off-pod
+### Preparing the complete dataset off-pod
 
-Token lengths depend on the model tokenizer and formatted dataset, so each
-profile has its own cache. They can be measured on a local CPU before renting
-the training pod; CUDA does not accelerate tokenizer work:
+Run this locally before renting the training pod:
 
 ```bash
-python -m trainer.sft.precompute_lengths
+python -m trainer.sft.precompute_dataset
 ```
 
-The command reads `HF_TOKEN` and `WANDB_API_KEY` from `trainer/sft/.env`,
-downloads only the dataset and tokenizer files, measures all three profiles,
-and uploads `<slug>-token-lengths:latest` to W&B. Training then downloads the
-matching cache during stage 8 and skips measurement.
+The command reads `HF_TOKEN` and `WANDB_API_KEY` from `trainer/sft/.env`. For
+Gemma and DeepSeek independently it performs the complete CPU preparation:
+31-way section slicing, chat-template rendering, length measurement, 8,192
+truncation, tokenization, and response-only label masking. It saves train and
+validation `input_ids`/`labels` and uploads the model-specific
+`<slug>-section-sliced-prepared-sft:latest` W&B artifact.
+
+On the A100 pod, `run_all` downloads those artifacts and passes their IDs and
+labels directly to TRL with `skip_prepare_dataset=True`. It does not load the
+raw Hugging Face dataset and does not slice, render, measure, truncate,
+tokenize, or mask it again. Only artifact download, model loading, and training
+remain. If an artifact is missing or incompatible, the trainer clearly reports
+that and falls back to local preparation rather than silently using bad IDs.
 
 Every run automatically scans all versions of that model's configured W&B
 checkpoint collection. It filters by base model, dataset, and dataset config,
@@ -188,12 +212,13 @@ Training writes final LoRA adapters to these profile-specific directories:
 
 ```text
 outputs/sft/qwen3-5-4b/lora/
-outputs/sft/gemma-4-e2b/lora/
-outputs/sft/deepseek-r1-distill-qwen-1-5b/lora/
+outputs/sft/gemma-4-e2b/section-sliced/lora/
+outputs/sft/deepseek-r1-distill-qwen-1-5b/section-sliced/lora/
 ```
 
 It also waits for matching W&B model artifacts named `qwen3-5-4b-lora`,
-`gemma-4-e2b-lora`, and `deepseek-r1-distill-qwen-1-5b-lora`, each with the
+`gemma-4-e2b-section-sliced-lora`, and
+`deepseek-r1-distill-qwen-1-5b-section-sliced-lora`, each with the
 `latest` alias. Do not terminate the training pod until it prints
 `W&B artifact uploaded` for the last model.
 
@@ -218,9 +243,11 @@ directory before terminating that pod.
 | --- | --- |
 | `config.py` | Three architecture/modality profiles and isolated paths |
 | `preflight.py` | Fail-fast environment and real-model smoke test |
-| `run_all.py` | Qwen → Gemma → DeepSeek process orchestration |
+| `run_all.py` | Gemma then DeepSeek process orchestration |
 | `transformer.py` | Unsloth loaders, language LoRA, frozen-tower checks |
-| `data.py` | Text-only chat formatting and per-tokenizer context sizing |
+| `section_slicing.py` | Notebook-equivalent per-section gold-span examples |
+| `data.py` | Slicing, text-only formatting, and context sizing |
+| `memory.py` | Conservative A100 memory calculation and fail-fast guard |
 | `training.py` | TRL trainer and profile-specific response masking |
 | `checkpoint.py` | Atomic checkpoint restore, adapter save, and explicit merge/Hub export |
 | `merge.py` | Later-session W&B adapter restore and 16-bit merge command |

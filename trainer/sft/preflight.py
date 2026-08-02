@@ -8,7 +8,7 @@ from importlib import metadata
 import os
 from typing import Any, Sequence
 
-from .config import MODEL_ORDER, MODEL_PROFILES, ModelConfig
+from .config import MODEL_PROFILES, TRAINING_ORDER, ModelConfig
 from .data import format_messages, get_text_tokenizer
 
 
@@ -190,15 +190,16 @@ def run_preflight(
     deep: bool = False,
     dataset: str = "Haeryz/putusan-structured-extraction",
     dataset_config: str = "sft",
+    model_keys: Sequence[str] = TRAINING_ORDER,
 ) -> None:
-    """Run all fail-fast checks, optionally loading every base model."""
+    """Run checks for the outstanding training profiles."""
 
     validate_environment()
     versions = validate_versions()
     print("Dependency versions:", ", ".join(
         f"{name}={version}" for name, version in versions.items()
     ))
-    for key in MODEL_ORDER:
+    for key in model_keys:
         profile = MODEL_PROFILES[key]
         print(f"Checking Hugging Face metadata: {profile.model_name}")
         validate_hub_model(profile)
@@ -207,8 +208,8 @@ def run_preflight(
     if deep:
         from .transformer import validate_hardware
 
-        validate_hardware(MODEL_PROFILES[MODEL_ORDER[0]])
-        for key in MODEL_ORDER:
+        validate_hardware(MODEL_PROFILES[model_keys[0]])
+        for key in model_keys:
             profile = MODEL_PROFILES[key]
             print(f"Deep model smoke test: {profile.model_name}")
             deep_model_smoke_test(profile)
@@ -226,11 +227,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--dataset", default="Haeryz/putusan-structured-extraction"
     )
     parser.add_argument("--dataset-config", default="sft")
+    parser.add_argument(
+        "--model",
+        action="append",
+        choices=tuple(MODEL_PROFILES),
+        help="Profile to check; repeat it (default: Gemma and DeepSeek)",
+    )
     args = parser.parse_args(argv)
     run_preflight(
         deep=args.deep,
         dataset=args.dataset,
         dataset_config=args.dataset_config,
+        model_keys=tuple(args.model or TRAINING_ORDER),
     )
     return 0
 

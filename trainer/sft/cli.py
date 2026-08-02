@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python -m trainer.sft --model gemma --gpu-count 2 "
             "--dataset-config sft_sections\n"
             "  python -m trainer.sft --model deepseek --max-steps 10\n\n"
-            "Run all three models sequentially with:\n"
+            "Run the outstanding Gemma and DeepSeek jobs sequentially with:\n"
             "  python -m trainer.sft.run_all"
         ),
     )
@@ -146,21 +146,21 @@ def build_parser() -> argparse.ArgumentParser:
         type=positive_int,
         default=None,
         help=(
-            "Override the 49,152-token context limit; oversized conversations "
+            "Override the profile context cap (8,192 for Gemma/DeepSeek); oversized conversations "
             "are automatically middle-truncated with chat markers preserved"
         ),
     )
     parser.add_argument(
         "--per-device-batch-size",
         type=positive_int,
-        default=defaults.training.per_device_train_batch_size,
-        help="Micro-batch size processed by each GPU",
+        default=None,
+        help="Micro-batch per GPU (profile default: Gemma 17, DeepSeek 24)",
     )
     parser.add_argument(
         "--gradient-accumulation-steps",
         type=positive_int,
-        default=defaults.training.gradient_accumulation_steps,
-        help="Micro-batches accumulated before each optimizer update",
+        default=None,
+        help="Accumulation (profile default: 1 for Gemma and DeepSeek)",
     )
     parser.add_argument(
         "--output-dir", type=Path, default=None,
@@ -247,8 +247,14 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
                 else config.training.evaluations_per_epoch
             ),
             save_steps=args.save_steps,
-            per_device_train_batch_size=args.per_device_batch_size,
-            gradient_accumulation_steps=args.gradient_accumulation_steps,
+            per_device_train_batch_size=(
+                args.per_device_batch_size
+                or config.training.per_device_train_batch_size
+            ),
+            gradient_accumulation_steps=(
+                args.gradient_accumulation_steps
+                or config.training.gradient_accumulation_steps
+            ),
             output_dir=args.output_dir or config.training.output_dir,
             adapter_dir=args.adapter_dir or config.training.adapter_dir,
         ),

@@ -1,4 +1,4 @@
-"""Run Qwen, Gemma, then DeepSeek SFT as isolated child processes."""
+"""Run the outstanding Gemma and DeepSeek SFT jobs as child processes."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import subprocess
 import sys
 from typing import Sequence
 
-from .config import MODEL_ORDER, MODEL_PROFILES, TrackingConfig
+from .config import MODEL_PROFILES, TRAINING_ORDER, TrackingConfig
 from .cli import HelpFormatter, positive_float, positive_int, resolve_gpu_count
 
 
@@ -32,10 +32,6 @@ def build_training_command(
         str(args.save_steps),
         "--gpu-count",
         str(args.gpu_count),
-        "--per-device-batch-size",
-        str(args.per_device_batch_size),
-        "--gradient-accumulation-steps",
-        str(args.gradient_accumulation_steps),
         "--wandb-project",
         args.wandb_project,
         "--wandb-run-name",
@@ -45,6 +41,15 @@ def build_training_command(
             else profile.slug
         ),
     ]
+    if args.per_device_batch_size is not None:
+        command.extend(
+            ("--per-device-batch-size", str(args.per_device_batch_size))
+        )
+    if args.gradient_accumulation_steps is not None:
+        command.extend((
+            "--gradient-accumulation-steps",
+            str(args.gradient_accumulation_steps),
+        ))
     if args.half_epoch:
         command.append("--half-epoch")
     else:
@@ -71,13 +76,13 @@ def build_training_command(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run Qwen, Gemma, then DeepSeek SFT sequentially. By default every "
+            "Run Gemma then DeepSeek SFT sequentially. By default every "
             "CUDA GPU visible inside the machine is used for each model."
         ),
         formatter_class=HelpFormatter,
         epilog=(
             "example:\n"
-            "  python -m trainer.sft.run_all --dataset-config sft_sections\n\n"
+            "  python -m trainer.sft.run_all --evaluations-per-epoch 4\n\n"
             "For single-model options:\n"
             "  python -m trainer.sft --help"
         ),
@@ -85,12 +90,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--skip-preflight",
         action="store_true",
-        help="Skip the default deep model/environment smoke test",
+        help="Skip the default fast metadata/environment preflight",
     )
     parser.add_argument(
         "--quick-preflight",
         action="store_true",
-        help="Check metadata and services without loading model weights",
+        help="Deprecated alias; fast preflight is now the default",
+    )
+    parser.add_argument(
+        "--deep-preflight",
+        action="store_true",
+        help="Load weights and run a forward smoke test before training",
     )
     parser.add_argument(
         "--dataset", default="Haeryz/putusan-structured-extraction",
@@ -131,12 +141,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override auto-detection and use exactly N visible GPUs",
     )
     parser.add_argument(
-        "--per-device-batch-size", type=positive_int, default=1,
-        help="Micro-batch size processed by each GPU",
+        "--per-device-batch-size", type=positive_int, default=None,
+        help="Override profile micro-batch (Gemma 17, DeepSeek 24)",
     )
     parser.add_argument(
-        "--gradient-accumulation-steps", type=positive_int, default=8,
-        help="Micro-batches accumulated before each optimizer update",
+        "--gradient-accumulation-steps", type=positive_int, default=None,
+        help="Override profile accumulation (default 1 for both)",
     )
     parser.add_argument(
         "--allow-non-a100", action="store_true",
@@ -185,14 +195,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--dataset-config",
             args.dataset_config,
         ]
-        if not args.quick_preflight:
+        if args.deep_preflight:
             preflight.append("--deep")
         subprocess.run(preflight, check=True, env=child_environment)
 
-    for position, model_key in enumerate(MODEL_ORDER, start=1):
+    for position, model_key in enumerate(TRAINING_ORDER, start=1):
         profile = MODEL_PROFILES[model_key]
         print(
-            f"\n=== [{position}/{len(MODEL_ORDER)}] "
+            f"\n=== [{position}/{len(TRAINING_ORDER)}] "
             f"{profile.model_name} ===",
             flush=True,
         )
@@ -201,7 +211,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             check=True,
             env=child_environment,
         )
-    print("\nAll three SFT jobs completed successfully.", flush=True)
+    print("\nGemma and DeepSeek SFT jobs completed successfully.", flush=True)
     return 0
 
 

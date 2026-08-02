@@ -190,6 +190,64 @@ def upload_length_cache(
     )
 
 
+def fetch_prepared_dataset(
+    run: Any, destination: Path, config: TrackingConfig
+) -> bool:
+    """Download a fully tokenized trainer-ready DatasetDict artifact."""
+
+    project = getattr(run, "project", None) or config.project
+    entity = getattr(run, "entity", None) or config.entity
+    prefix = f"{entity}/{project}" if entity else project
+    reference = f"{prefix}/{config.prepared_dataset_artifact_name}:latest"
+    try:
+        artifact = run.use_artifact(
+            reference, type=config.prepared_dataset_artifact_type
+        )
+        destination.mkdir(parents=True, exist_ok=True)
+        artifact.download(root=str(destination))
+    except Exception as error:
+        print(
+            f"No prepared dataset artifact ({type(error).__name__}); "
+            "falling back to local preparation.",
+            flush=True,
+        )
+        return False
+    manifest = destination / "manifest.json"
+    if not manifest.is_file():
+        print(f"Prepared artifact {reference} has no manifest; ignoring it.")
+        return False
+    print(f"Prepared tokenized dataset restored from {reference}.", flush=True)
+    return True
+
+
+def upload_prepared_dataset(
+    run: Any,
+    prepared_dir: Path,
+    config: TrackingConfig,
+    metadata: dict[str, Any],
+) -> None:
+    """Upload final token IDs/labels so the GPU pod does no tokenization."""
+
+    if not (prepared_dir / "manifest.json").is_file():
+        raise FileNotFoundError(f"Prepared dataset missing at {prepared_dir}")
+    import wandb
+
+    artifact = wandb.Artifact(
+        name=config.prepared_dataset_artifact_name,
+        type=config.prepared_dataset_artifact_type,
+        description=(
+            "Section-sliced, truncated, tokenized response-only SFT train and "
+            "validation datasets"
+        ),
+        metadata=metadata,
+    )
+    artifact.add_dir(local_path=str(prepared_dir))
+    committed = run.log_artifact(artifact, aliases=["latest"]).wait(
+        timeout=config.upload_timeout_seconds
+    )
+    print(f"Prepared dataset uploaded as {committed.name}:latest.", flush=True)
+
+
 def log_model_artifact(
     run: Any,
     adapter_dir: Path,

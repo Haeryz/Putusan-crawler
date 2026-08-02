@@ -11,8 +11,10 @@ from trainer.sft.data import (
     format_messages,
     load_splits,
     measure_token_lengths,
+    tokenize_response_only_text,
     truncate_text_preserving_response,
 )
+from trainer.sft.section_slicing import SECTION_GUIDANCE, slice_row_by_section
 
 
 class FakeTokenizer:
@@ -41,7 +43,7 @@ def test_load_splits_uses_hugging_face_sft_config(monkeypatch) -> None:
         SimpleNamespace(load_dataset=fake_load_dataset),
     )
 
-    train, validation = load_splits(DataConfig())
+    train, validation = load_splits(DataConfig(slice_by_section=False))
 
     assert train == ["train-row"]
     assert validation == ["validation-row"]
@@ -49,6 +51,30 @@ def test_load_splits_uses_hugging_face_sft_config(monkeypatch) -> None:
         ("Haeryz/putusan-structured-extraction", "sft", "train"),
         ("Haeryz/putusan-structured-extraction", "sft", "validation"),
     ]
+
+
+def test_notebook_section_slicing_emits_one_gold_span_example_per_section() -> None:
+    sections = {section: [] for section in SECTION_GUIDANCE}
+    sections["judul"] = ["P U T U S A N", "PUTUSAN"]
+    row = {
+        "id": "case-1",
+        "corpus": "Anak",
+        "target_json": {"sections": sections},
+    }
+
+    children = slice_row_by_section(row, source_row_no=7)
+
+    assert len(children) == 31
+    judul = children[0]
+    assert judul["id"] == "row-000007::case-1::judul"
+    assert judul["sliced_input"] == (
+        "<span>\nP U T U S A N\n</span>\n<span>\nPUTUSAN\n</span>"
+    )
+    assert judul["messages"][1]["content"].endswith(judul["sliced_input"])
+    assert judul["messages"][2]["content"] == judul["answer"]
+    assert '"judul": ["P U T U S A N", "PUTUSAN"]' in judul["answer"]
+    assert children[1]["is_empty"] is True
+    assert '"empty_sections": ["nomor_putusan"]' in children[1]["answer"]
 
 
 def test_format_messages_renders_each_conversation() -> None:
@@ -161,3 +187,22 @@ def test_short_marker_complete_text_is_not_modified() -> None:
     assert truncate_text_preserving_response(
         text, CharacterTokenizer(), config, max_length=100
     ) == text
+
+
+def test_precomputed_labels_mask_prompt_and_assistant_marker() -> None:
+    config = MODEL_PROFILES["qwen"]
+    text = (
+        config.instruction_part
+        + "source"
+        + config.response_part
+        + "ANSWER"
+    )
+
+    prepared = tokenize_response_only_text(
+        text, CharacterTokenizer(), config, max_length=200
+    )
+
+    answer_at = text.index("ANSWER")
+    assert prepared["input_ids"] == [ord(character) for character in text]
+    assert prepared["labels"][:answer_at] == [-100] * answer_at
+    assert prepared["labels"][answer_at:] == [ord(c) for c in "ANSWER"]

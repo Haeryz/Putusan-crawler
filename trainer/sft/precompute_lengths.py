@@ -1,4 +1,4 @@
-"""Precompute per-model token lengths locally and publish them to W&B."""
+"""Build fully tokenized per-model SFT datasets locally and publish to W&B."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from typing import Any, Sequence
 
 from .cli import HelpFormatter
 from .config import (
-    MODEL_ORDER,
     MODEL_PROFILES,
+    TRAINING_ORDER,
     TrackingConfig,
     run_config_for_model,
 )
@@ -21,8 +21,11 @@ from .data import (
     format_dataset,
     length_cache_path,
     load_or_measure_lengths,
+    prepare_tokenized_dataset,
+    slice_dataset_by_section,
 )
-from .tracking import upload_length_cache
+from .prepared import prepared_manifest, save_prepared_splits
+from .tracking import upload_length_cache, upload_prepared_dataset
 
 
 SECRET_ENV_KEYS = {"HF_TOKEN", "WANDB_API_KEY", "WANDB_ENTITY"}
@@ -52,23 +55,23 @@ def load_secret_env(path: Path) -> set[str]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Download only datasets/tokenizers, measure formatted training "
-            "token lengths locally, and upload reusable caches to W&B. No base "
-            "model weights or training GPU are used."
+            "Slice, format, truncate, tokenize, and response-mask complete "
+            "Gemma/DeepSeek datasets locally, then upload trainer-ready W&B "
+            "artifacts. No base-model weights or training GPU are used."
         ),
         formatter_class=HelpFormatter,
         epilog=(
             "example:\n"
-            "  python -m trainer.sft.precompute_lengths\n"
-            "  python -m trainer.sft.precompute_lengths --dataset-config "
-            "sft_sections --model qwen"
+            "  python -m trainer.sft.precompute_dataset\n"
+            "  python -m trainer.sft.precompute_dataset --model gemma "
+            "--model deepseek"
         ),
     )
     parser.add_argument(
         "--model",
         action="append",
-        choices=MODEL_ORDER,
-        help="Profile to measure; repeat the option (default: all three)",
+        choices=tuple(MODEL_PROFILES),
+        help="Profile to measure; repeat it (default: Gemma and DeepSeek)",
     )
     parser.add_argument(
         "--dataset",
@@ -95,20 +98,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Remeasure instead of using a valid local cache",
+        help="Remeasure and rebuild prepared datasets",
     )
     parser.add_argument(
         "--upload-existing-only",
         action="store_true",
-        help="Upload existing local cache files without loading the dataset/tokenizers",
+        help="Upload existing caches and prepared datasets without tokenization",
     )
     return parser
 
 
-def load_train_dataset(repository: str, subset: str) -> Any:
+def load_source_splits(repository: str, subset: str) -> tuple[Any, Any]:
     from datasets import load_dataset
 
-    return load_dataset(repository, subset, split="train")
+    return (
+        load_dataset(repository, subset, split="train"),
+        load_dataset(repository, subset, split="validation"),
+    )
 
 
 def load_tokenizer(model_key: str, token: str | None) -> Any:
@@ -148,14 +154,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not os.environ.get("WANDB_API_KEY"):
         raise RuntimeError("WANDB_API_KEY is required to upload length caches")
 
-    model_keys = tuple(args.model or MODEL_ORDER)
-    raw_dataset = None
+    model_keys = tuple(args.model or TRAINING_ORDER)
+    source_splits = None
     if not args.upload_existing_only:
         print(
-            f"Loading {args.dataset}/{args.dataset_config} train split once...",
+            f"Loading {args.dataset}/{args.dataset_config} source splits once...",
             flush=True,
         )
-        raw_dataset = load_train_dataset(args.dataset, args.dataset_config)
+        source_splits = load_source_splits(args.dataset, args.dataset_config)
 
     import wandb
 
@@ -178,6 +184,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         cache_path = length_cache_path(config.data)
         if args.upload_existing_only:
             import numpy as np
+            import json
 
             if not cache_path.is_file():
                 raise FileNotFoundError(
@@ -189,6 +196,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"({len(lengths)} rows)...",
                 flush=True,
             )
+            manifest_path = config.data.prepared_dir / "manifest.json"
+            if not manifest_path.is_file():
+                raise FileNotFoundError(
+                    f"No prepared dataset for {model_key}: "
+                    f"{config.data.prepared_dir}"
+                )
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            profile_data = manifest["length_profile"]
+            profile = LengthProfile(**profile_data)
         else:
             print(
                 f"\n[{index}/{len(model_keys)}] Loading tokenizer for "
@@ -198,20 +214,64 @@ def main(argv: Sequence[str] | None = None) -> int:
             tokenizer_or_processor = load_tokenizer(
                 model_key, os.environ.get("HF_TOKEN")
             )
-            dataset = format_dataset(
-                raw_dataset, tokenizer_or_processor, model_config
+            if source_splits is None:
+                raise RuntimeError("Source splits were not loaded")
+            train_source, validation_source = source_splits
+            train_dataset = train_source
+            validation_dataset = validation_source
+            if config.data.slice_by_section:
+                train_dataset = slice_dataset_by_section(train_dataset)
+                validation_dataset = slice_dataset_by_section(validation_dataset)
+            train_dataset = format_dataset(
+                train_dataset, tokenizer_or_processor, model_config
+            )
+            validation_dataset = format_dataset(
+                validation_dataset, tokenizer_or_processor, model_config
             )
             if args.force:
                 remove_local_cache(cache_path)
             lengths = load_or_measure_lengths(
-                dataset, tokenizer_or_processor, config.data
+                train_dataset, tokenizer_or_processor, config.data
             )
-        profile, all_rows_fit = summarize_lengths(
-            lengths,
-            model_config.max_seq_length,
-            config.data.length_percentile,
-            config.data.length_multiple,
-        )
+            profile, _ = summarize_lengths(
+                lengths,
+                model_config.max_seq_length,
+                config.data.length_percentile,
+                config.data.length_multiple,
+            )
+            prepared_train = prepare_tokenized_dataset(
+                train_dataset,
+                tokenizer_or_processor,
+                model_config,
+                profile.max_length,
+            )
+            prepared_validation = prepare_tokenized_dataset(
+                validation_dataset,
+                tokenizer_or_processor,
+                model_config,
+                profile.max_length,
+            )
+            manifest = prepared_manifest(
+                config,
+                profile.max_length,
+                len(prepared_train),
+                len(prepared_validation),
+                {
+                    "p50": profile.p50,
+                    "p90": profile.p90,
+                    "p95": profile.p95,
+                    "maximum": profile.maximum,
+                    "max_length": profile.max_length,
+                    "coverage": profile.coverage,
+                },
+            )
+            save_prepared_splits(
+                prepared_train,
+                prepared_validation,
+                config.data.prepared_dir,
+                manifest,
+            )
+        all_rows_fit = profile.coverage == 1.0
         print(
             f"{model_key}: rows={len(lengths)}, p50={profile.p50}, "
             f"p90={profile.p90}, p95={profile.p95}, max={profile.maximum}, "
@@ -257,13 +317,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "maximum": profile.maximum,
                     "selected_max_length": profile.max_length,
                     "coverage": profile.coverage,
-                    "context_profile_compatible": compatible,
+                    "context_profile_compatible": all_rows_fit,
                 },
+            )
+            upload_prepared_dataset(
+                run,
+                config.data.prepared_dir,
+                config.tracking,
+                manifest,
             )
         finally:
             run.finish()
 
-    print("\nAll requested token-length caches uploaded to W&B.", flush=True)
+    print(
+        "\nAll requested tokenized datasets and length caches uploaded to W&B.",
+        flush=True,
+    )
     return 0
 
 

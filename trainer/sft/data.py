@@ -10,6 +10,7 @@ import time
 from typing import Any, Iterable, Sequence
 
 from .config import DataConfig, ModelConfig
+from .section_slicing import slice_batch_by_section
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,22 @@ def load_splits(config: DataConfig) -> tuple[Any, Any]:
     validation = load_dataset(
         config.repository, config.subset, split=config.validation_split
     )
+    if config.slice_by_section:
+        train = slice_dataset_by_section(train)
+        validation = slice_dataset_by_section(validation)
     return train, validation
+
+
+def slice_dataset_by_section(dataset: Any) -> Any:
+    """Replace whole-document rows with notebook-equivalent section rows."""
+
+    return dataset.map(
+        slice_batch_by_section,
+        batched=True,
+        with_indices=True,
+        remove_columns=dataset.column_names,
+        desc="Slicing each decision into gold-span section examples",
+    )
 
 
 def format_messages(
@@ -176,6 +192,83 @@ def truncate_dataset_preserving_responses(
         },
         batched=True,
         desc="Preserving chat markers while truncating long rows",
+    )
+
+
+def _last_subsequence_start(
+    values: Sequence[int], needle: Sequence[int]
+) -> int:
+    """Return the last exact token-subsequence start, or -1."""
+
+    if not needle or len(needle) > len(values):
+        return -1
+    for start in range(len(values) - len(needle), -1, -1):
+        if list(values[start : start + len(needle)]) == list(needle):
+            return start
+    return -1
+
+
+def tokenize_response_only_text(
+    text: str,
+    tokenizer_or_processor: Any,
+    model_config: ModelConfig,
+    max_length: int,
+) -> dict[str, list[int]]:
+    """Create final token IDs and labels, with prompt/marker labels masked."""
+
+    tokenizer = get_text_tokenizer(tokenizer_or_processor)
+    truncated = truncate_text_preserving_response(
+        text, tokenizer, model_config, max_length
+    )
+    input_ids = _encode_text(tokenizer, truncated)
+    marker_ids = _encode_text(tokenizer, model_config.response_part)
+    marker_at = _last_subsequence_start(input_ids, marker_ids)
+    if marker_at < 0:
+        raise ValueError(
+            f"Tokenized {model_config.profile_name} row lacks response marker"
+        )
+    answer_at = marker_at + len(marker_ids)
+    if answer_at >= len(input_ids):
+        raise ValueError("Prepared row has no supervised response tokens")
+    labels = [-100] * answer_at + input_ids[answer_at:]
+    return {"input_ids": input_ids, "labels": labels}
+
+
+def prepare_tokenized_dataset(
+    dataset: Any,
+    tokenizer_or_processor: Any,
+    model_config: ModelConfig,
+    max_length: int,
+) -> Any:
+    """Build the final trainer-ready dataset entirely off the GPU pod."""
+
+    def prepare_batch(examples: dict[str, Sequence[str]]) -> dict[str, list[Any]]:
+        rows = [
+            tokenize_response_only_text(
+                text, tokenizer_or_processor, model_config, max_length
+            )
+            for text in examples["text"]
+        ]
+        return {
+            key: [row[key] for row in rows]
+            for key in ("input_ids", "labels")
+        }
+
+    return dataset.map(
+        prepare_batch,
+        batched=True,
+        batch_size=64,
+        writer_batch_size=64,
+        remove_columns=dataset.column_names,
+        desc=f"Tokenizing and response-masking {model_config.profile_name}",
+    )
+
+
+def is_prepared_dataset(dataset: Any) -> bool:
+    """Return whether a dataset already has final IDs and response labels."""
+
+    return {"input_ids", "labels"}.issubset(
+        set(getattr(dataset, "column_names", ()))
     )
 
 

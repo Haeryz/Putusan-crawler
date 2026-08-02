@@ -79,7 +79,7 @@ def test_gemma_adapter_uses_multimodal_loader(monkeypatch, tmp_path: Path) -> No
     )
     assert calls["kwargs"] == {
         "model_name": str(tmp_path),
-        "max_seq_length": 49_152,
+        "max_seq_length": 8_192,
         "load_in_4bit": True,
     }
     assert calls["inference"] == "model"

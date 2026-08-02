@@ -128,6 +128,11 @@ def test_complete_workflow_runs_modules_in_order_and_uploads(
     )
     monkeypatch.setattr(
         workflow,
+        "synchronize_prepared_dataset",
+        lambda config, run: events.append("restore_prepared") or None,
+    )
+    monkeypatch.setattr(
+        workflow,
         "format_dataset",
         lambda dataset, loaded_tokenizer, model_config: events.append("format")
         or dataset,
@@ -206,6 +211,7 @@ def test_complete_workflow_runs_modules_in_order_and_uploads(
         "restore_checkpoint",
         "load_model",
         "attach",
+        "restore_prepared",
         "load_splits",
         "format",
         "format",

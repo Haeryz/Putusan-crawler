@@ -26,6 +26,7 @@ if __package__ in {None, ""}:
     from trainer.sft.checkpoint import latest_checkpoint, save_adapter
     from trainer.sft.config import RunConfig
     from trainer.sft.data import (
+        LengthProfile,
         choose_max_length,
         format_dataset,
         length_cache_path,
@@ -34,9 +35,12 @@ if __package__ in {None, ""}:
         load_splits,
         truncate_dataset_preserving_responses,
     )
+    from trainer.sft.memory import assert_training_memory_fits
+    from trainer.sft.prepared import load_prepared_splits
     from trainer.sft.tracking import (
         checkpoint_upload_callback,
         fetch_length_cache,
+        fetch_prepared_dataset,
         finish_wandb,
         initialize_wandb,
         log_model_artifact,
@@ -54,6 +58,7 @@ else:
     from .checkpoint import latest_checkpoint, save_adapter
     from .config import RunConfig
     from .data import (
+        LengthProfile,
         choose_max_length,
         format_dataset,
         length_cache_path,
@@ -62,9 +67,12 @@ else:
         load_splits,
         truncate_dataset_preserving_responses,
     )
+    from .memory import assert_training_memory_fits
+    from .prepared import load_prepared_splits
     from .tracking import (
         checkpoint_upload_callback,
         fetch_length_cache,
+        fetch_prepared_dataset,
         finish_wandb,
         initialize_wandb,
         log_model_artifact,
@@ -189,6 +197,55 @@ def synchronize_wandb_checkpoint_restore(
     )
 
 
+def synchronize_prepared_dataset(
+    config: RunConfig, wandb_run: Any | None
+) -> tuple[Any, Any, dict[str, Any]] | None:
+    """Restore model-specific token IDs once and share them across workers."""
+
+    existing = load_prepared_splits(config.data.prepared_dir, config)
+    if existing is not None:
+        return existing
+    if not config.tracking.reuse_prepared_dataset:
+        return None
+    world_size = distributed_world_size()
+    checkpoint_marker = _restore_sync_marker(config)
+    marker = checkpoint_marker.with_name(
+        checkpoint_marker.name.replace("checkpoint", "prepared-dataset")
+    )
+    if _is_rank_zero():
+        if wandb_run is None:
+            raise RuntimeError("Rank 0 has no W&B run for prepared dataset")
+        available = fetch_prepared_dataset(
+            wandb_run, config.data.prepared_dir, config.tracking
+        )
+        payload = {"ok": True, "available": available}
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        temporary = marker.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(temporary, marker)
+        return (
+            load_prepared_splits(config.data.prepared_dir, config)
+            if available
+            else None
+        )
+    if world_size == 1:
+        return None
+    deadline = time.monotonic() + config.data.distributed_cache_timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            time.sleep(1)
+            continue
+        if not payload.get("available"):
+            return None
+        prepared = load_prepared_splits(config.data.prepared_dir, config)
+        if prepared is not None:
+            return prepared
+        time.sleep(1)
+    raise TimeoutError("Timed out waiting for prepared dataset restore")
+
+
 def distributed_launch_command(
     script: Path, argv: Sequence[str], gpu_count: int
 ) -> list[str]:
@@ -262,51 +319,65 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
         _stage(5, total_stages, "Verify long-context patches and attach LoRA")
         model = attach_lora(model, config.model)
 
-        _stage(6, total_stages, "Load train and validation datasets")
-        train_dataset, eval_dataset = load_splits(config.data)
-
-        _stage(
-            7,
-            total_stages,
-            f"Apply {config.model.profile_name} chat template",
-        )
-        train_dataset = format_dataset(
-            train_dataset, tokenizer, config.model
-        )
-        eval_dataset = format_dataset(eval_dataset, tokenizer, config.model)
-
-        _stage(8, total_stages, "Measure token lengths and select context")
-        cache_path = length_cache_path(config.data)
-        reuse_cache = (
-            _is_rank_zero()
-            and wandb_run is not None
-            and config.tracking.reuse_length_cache
-        )
-        if reuse_cache and load_cached_lengths(train_dataset, config.data) is None:
-            fetch_length_cache(wandb_run, cache_path, config.tracking)
-        # Checked before measuring so a stale download still triggers an upload.
-        measured = load_cached_lengths(train_dataset, config.data) is None
-        lengths = load_or_measure_lengths(
-            train_dataset, tokenizer, config.data
-        )
-        if reuse_cache and measured:
-            upload_length_cache(
-                wandb_run,
-                cache_path,
-                config.tracking,
-                {
-                    "repository": config.data.repository,
-                    "subset": config.data.subset,
-                    "split": config.data.train_split,
-                    "rows": len(lengths),
-                },
+        _stage(6, total_stages, "Restore fully tokenized dataset from W&B")
+        prepared = synchronize_prepared_dataset(config, wandb_run)
+        if prepared is not None:
+            train_dataset, eval_dataset, manifest = prepared
+            profile = LengthProfile(**manifest["length_profile"])
+            _stage(7, total_stages, "Use precomputed input IDs and labels")
+            _stage(8, total_stages, "Skip on-pod formatting and tokenization")
+        else:
+            _stage(6, total_stages, "Load raw train and validation datasets")
+            train_dataset, eval_dataset = load_splits(config.data)
+            _stage(
+                7,
+                total_stages,
+                f"Apply {config.model.profile_name} chat template",
             )
-        profile = choose_max_length(
-            lengths,
-            config.model.max_seq_length,
-            config.data.length_percentile,
-            config.data.length_multiple,
-        )
+            train_dataset = format_dataset(
+                train_dataset, tokenizer, config.model
+            )
+            eval_dataset = format_dataset(eval_dataset, tokenizer, config.model)
+            _stage(8, total_stages, "Measure lengths and prepare locally")
+            cache_path = length_cache_path(config.data)
+            reuse_cache = (
+                _is_rank_zero()
+                and wandb_run is not None
+                and config.tracking.reuse_length_cache
+            )
+            if (
+                reuse_cache
+                and load_cached_lengths(train_dataset, config.data) is None
+            ):
+                fetch_length_cache(wandb_run, cache_path, config.tracking)
+            measured = load_cached_lengths(train_dataset, config.data) is None
+            lengths = load_or_measure_lengths(
+                train_dataset, tokenizer, config.data
+            )
+            if reuse_cache and measured:
+                upload_length_cache(
+                    wandb_run,
+                    cache_path,
+                    config.tracking,
+                    {
+                        "repository": config.data.repository,
+                        "subset": config.data.subset,
+                        "split": config.data.train_split,
+                        "rows": len(lengths),
+                    },
+                )
+            profile = choose_max_length(
+                lengths,
+                config.model.max_seq_length,
+                config.data.length_percentile,
+                config.data.length_multiple,
+            )
+            train_dataset = truncate_dataset_preserving_responses(
+                train_dataset, tokenizer, config.model, profile.max_length
+            )
+            eval_dataset = truncate_dataset_preserving_responses(
+                eval_dataset, tokenizer, config.model, profile.max_length
+            )
         world_size = distributed_world_size()
         automatic_eval_cadence = config.training.eval_steps is None
         eval_steps = config.training.resolved_eval_steps(
@@ -315,12 +386,6 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
         config = replace(
             config,
             training=replace(config.training, eval_steps=eval_steps),
-        )
-        train_dataset = truncate_dataset_preserving_responses(
-            train_dataset, tokenizer, config.model, profile.max_length
-        )
-        eval_dataset = truncate_dataset_preserving_responses(
-            eval_dataset, tokenizer, config.model, profile.max_length
         )
         if _is_rank_zero():
             print(
@@ -350,6 +415,24 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
                 )
             )
 
+        memory = assert_training_memory_fits(
+            config.model,
+            config.training,
+            profile.max_length,
+            config.model.minimum_vram_gb,
+        )
+        if _is_rank_zero():
+            print(
+                "Conservative VRAM budget/GPU: "
+                f"mixed BF16/NF4 model={memory.model_storage_gib:.1f} GiB, "
+                f"adapter+optimizer={memory.adapter_optimizer_gib:.1f} GiB, "
+                f"checkpointed activations={memory.checkpointed_activations_gib:.1f} GiB, "
+                f"fused-loss workspace={memory.fused_loss_workspace_gib:.1f} GiB, "
+                f"runtime={memory.runtime_reserve_gib:.1f} GiB, "
+                f"fragmentation={memory.fragmentation_headroom_gib:.1f} GiB; "
+                f"estimated peak={memory.total_gib:.1f}/{memory.usable_vram_gib:.1f} GiB safe budget"
+            )
+
         _stage(9, total_stages, "Build response-only SFT trainer")
         trainer = build_trainer(
             model,
@@ -365,6 +448,7 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
             "base_model": config.model.model_name,
             "dataset": config.data.repository,
             "dataset_config": config.data.subset,
+            "section_slicing": config.data.slice_by_section,
             "max_length": profile.max_length,
             "truncation_strategy": "middle-preserve-chat-markers-and-response",
             "fraction_rows_truncated": 1 - profile.coverage,

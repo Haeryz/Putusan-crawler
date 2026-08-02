@@ -61,9 +61,9 @@ from pathlib import Path
 
 from huggingface_hub import HfApi, constants, snapshot_download
 
-from trainer.sft.config import MODEL_ORDER, MODEL_PROFILES
+from trainer.sft.config import MODEL_PROFILES, TRAINING_ORDER
 
-model_names = [MODEL_PROFILES[key].model_name for key in MODEL_ORDER]
+model_names = [MODEL_PROFILES[key].model_name for key in TRAINING_ORDER]
 token = os.environ["HF_TOKEN"]
 api = HfApi(token=token)
 

@@ -29,6 +29,11 @@ class ModelConfig:
     require_tiled_mlp: bool = True
     non_text_module_fragments: tuple[str, ...] = ("visual", "vision")
     max_seq_length: int = 49_152
+    parameter_count_billions: float = 4.0
+    non_quantized_parameter_count_billions: float = 0.64
+    hidden_size: int = 2_560
+    hidden_layers: int = 32
+    vocabulary_size: int = 248_320
     load_in_4bit: bool = True
     lora_rank: int = 32
     lora_alpha: int = 32
@@ -47,6 +52,9 @@ class ModelConfig:
 
 
 MODEL_ORDER: tuple[str, ...] = ("qwen", "gemma", "deepseek")
+# Qwen is retained for merge/inference and reproducibility, but its SFT is
+# already complete. New sequential jobs train only the two outstanding models.
+TRAINING_ORDER: tuple[str, ...] = ("gemma", "deepseek")
 
 MODEL_PROFILES: dict[str, ModelConfig] = {
     "qwen": ModelConfig(),
@@ -68,6 +76,13 @@ MODEL_PROFILES: dict[str, ModelConfig] = {
             "multi_modal_projector",
             "multimodal_projector",
         ),
+        max_seq_length=8_192,
+        parameter_count_billions=5.1,
+        # PLE tables + shared token embeddings + frozen vision/audio towers.
+        non_quantized_parameter_count_billions=3.20,
+        hidden_size=1_536,
+        hidden_layers=35,
+        vocabulary_size=262_144,
     ),
     "deepseek": ModelConfig(
         profile_name="deepseek",
@@ -79,6 +94,13 @@ MODEL_PROFILES: dict[str, ModelConfig] = {
         require_linear_attention_lora=False,
         require_tiled_mlp=False,
         non_text_module_fragments=(),
+        max_seq_length=8_192,
+        parameter_count_billions=1.8,
+        # Untied input embedding and LM head are normally kept in BF16.
+        non_quantized_parameter_count_billions=0.467,
+        hidden_size=1_536,
+        hidden_layers=28,
+        vocabulary_size=151_936,
     ),
 }
 
@@ -116,7 +138,10 @@ class DataConfig:
     length_multiple: int = 256
     tokenization_batch_size: int = 256
     cache_dir: Path = Path("outputs/sft/qwen3-5-4b/cache")
+    prepared_dir: Path = Path("outputs/sft/qwen3-5-4b/prepared-dataset")
     distributed_cache_timeout_seconds: int = 3_600
+    slice_by_section: bool = False
+    section_slicing_version: int = 1
 
 
 @dataclass(frozen=True)
@@ -201,6 +226,9 @@ class TrackingConfig:
     length_cache_artifact_name: str = "qwen3-5-4b-token-lengths"
     length_cache_artifact_type: str = "dataset"
     reuse_length_cache: bool = True
+    prepared_dataset_artifact_name: str = "qwen3-5-4b-prepared-sft"
+    prepared_dataset_artifact_type: str = "tokenized-dataset"
+    reuse_prepared_dataset: bool = True
 
 
 @dataclass(frozen=True)
@@ -217,16 +245,37 @@ def run_config_for_model(model: ModelConfig) -> RunConfig:
     """Build isolated local and W&B paths for one supported model."""
 
     slug = model.slug
+    section_slicing = model.profile_name in TRAINING_ORDER
+    local_root = (
+        f"outputs/sft/{slug}/section-sliced"
+        if section_slicing
+        else f"outputs/sft/{slug}"
+    )
+    artifact_slug = f"{slug}-section-sliced" if section_slicing else slug
+    batch_size, accumulation = {
+        "qwen": (1, 8),
+        # Largest integer micro-batches fitting the conservative
+        # 8,192-token / 78-GiB budget. The next integer fails memory.py.
+        "gemma": (17, 1),
+        "deepseek": (24, 1),
+    }[model.profile_name]
     return RunConfig(
         model=model,
-        data=DataConfig(cache_dir=Path(f"outputs/sft/{slug}/cache")),
+        data=DataConfig(
+            cache_dir=Path(f"{local_root}/cache"),
+            prepared_dir=Path(f"{local_root}/prepared-dataset"),
+            slice_by_section=section_slicing,
+        ),
         training=TrainingConfig(
-            output_dir=Path(f"outputs/sft/{slug}/checkpoints"),
-            adapter_dir=Path(f"outputs/sft/{slug}/lora"),
+            output_dir=Path(f"{local_root}/checkpoints"),
+            adapter_dir=Path(f"{local_root}/lora"),
+            per_device_train_batch_size=batch_size,
+            gradient_accumulation_steps=accumulation,
         ),
         tracking=TrackingConfig(
-            artifact_name=f"{slug}-lora",
-            checkpoint_artifact_name=f"{slug}-checkpoint",
-            length_cache_artifact_name=f"{slug}-token-lengths",
+            artifact_name=f"{artifact_slug}-lora",
+            checkpoint_artifact_name=f"{artifact_slug}-checkpoint",
+            length_cache_artifact_name=f"{artifact_slug}-token-lengths",
+            prepared_dataset_artifact_name=f"{artifact_slug}-prepared-sft",
         ),
     )
