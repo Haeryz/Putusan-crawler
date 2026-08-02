@@ -219,7 +219,7 @@ def test_trainer_saves_resumable_state_every_configured_steps(
     assert sft_config["num_train_epochs"] == 1.0
     assert sft_config["max_steps"] == -1
     assert sft_config["max_length"] == 256
-    assert sft_config["group_by_length"] is True
+    assert sft_config["train_sampling_strategy"] == "group_by_length"
     assert sft_config["auto_find_batch_size"] is True
     assert captured["trainer_kwargs"]["processing_class"].truncation_side == "right"
 

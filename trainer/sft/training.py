@@ -52,7 +52,9 @@ def build_trainer(
         report_to=config.report_to,
         max_length=max_length,
         packing=False,
-        group_by_length=True,
+        # Transformers 5.5 replaced the group_by_length boolean with an
+        # explicit sampler selector.
+        train_sampling_strategy="group_by_length",
         auto_find_batch_size=True,
         bf16=True,
         fp16=False,
