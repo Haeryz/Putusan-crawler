@@ -175,7 +175,9 @@ def test_complete_workflow_runs_modules_in_order_and_uploads(
         "checkpoint_upload_callback",
         lambda *args: events.append("build_checkpoint_callback") or object(),
     )
-    monkeypatch.setattr(workflow, "latest_checkpoint", lambda output_dir: None)
+    monkeypatch.setattr(
+        workflow, "latest_checkpoint", lambda output_dir, metadata=None: None
+    )
     monkeypatch.setattr(
         workflow,
         "save_adapter",

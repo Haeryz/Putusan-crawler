@@ -45,6 +45,7 @@ if __package__ in {None, ""}:
         initialize_wandb,
         log_model_artifact,
         restore_newest_wandb_checkpoint,
+        required_local_checkpoint_metadata,
         upload_length_cache,
     )
     from trainer.sft.training import build_trainer
@@ -77,6 +78,7 @@ else:
         initialize_wandb,
         log_model_artifact,
         restore_newest_wandb_checkpoint,
+        required_local_checkpoint_metadata,
         upload_length_cache,
     )
     from .training import build_trainer
@@ -380,8 +382,10 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
             )
         world_size = distributed_world_size()
         automatic_eval_cadence = config.training.eval_steps is None
-        eval_steps = config.training.resolved_eval_steps(
-            len(train_dataset), world_size
+        eval_steps = (
+            config.training.resolved_eval_steps(len(train_dataset), world_size)
+            if config.training.eval_strategy == "steps"
+            else config.training.eval_steps or 1
         )
         config = replace(
             config,
@@ -406,14 +410,17 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
                 f"{config.training.gradient_accumulation_steps} accumulation "
                 f"= {config.training.effective_batch_size(world_size)}"
             )
-            print(
-                f"Evaluation: every {eval_steps} optimizer steps"
-                + (
-                    f" (target {config.training.evaluations_per_epoch}/epoch)"
-                    if automatic_eval_cadence
-                    else " (fixed interval)"
+            if config.training.eval_strategy == "no":
+                print("Evaluation: disabled")
+            else:
+                print(
+                    f"Evaluation: every {eval_steps} optimizer steps"
+                    + (
+                        f" (target {config.training.evaluations_per_epoch}/epoch)"
+                        if automatic_eval_cadence
+                        else " (fixed interval)"
+                    )
                 )
-            )
 
         memory = assert_training_memory_fits(
             config.model,
@@ -449,6 +456,9 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
             "dataset": config.data.repository,
             "dataset_config": config.data.subset,
             "section_slicing": config.data.slice_by_section,
+            "train_curriculum": config.data.train_curriculum,
+            "train_sampling_strategy": config.training.train_sampling_strategy,
+            "eval_strategy": config.training.eval_strategy,
             "max_length": profile.max_length,
             "truncation_strategy": "middle-preserve-chat-markers-and-response",
             "fraction_rows_truncated": 1 - profile.coverage,
@@ -472,7 +482,10 @@ def run_training(config: RunConfig) -> tuple[Any, Any, Any]:
                 )
             )
 
-        resume_checkpoint = latest_checkpoint(config.training.output_dir)
+        resume_checkpoint = latest_checkpoint(
+            config.training.output_dir,
+            required_local_checkpoint_metadata(config),
+        )
         if trainer.is_world_process_zero() and resume_checkpoint is not None:
             print(f"Resuming from {resume_checkpoint}.", flush=True)
 

@@ -10,7 +10,11 @@ import time
 from typing import Any, Iterable, Sequence
 
 from .config import DataConfig, ModelConfig
-from .section_slicing import slice_batch_by_section
+from .section_slicing import (
+    HARD_FIRST_CURRICULUM,
+    hard_first_order_indices,
+    slice_batch_by_section,
+)
 
 
 @dataclass(frozen=True)
@@ -41,21 +45,32 @@ def load_splits(config: DataConfig) -> tuple[Any, Any]:
         config.repository, config.subset, split=config.validation_split
     )
     if config.slice_by_section:
-        train = slice_dataset_by_section(train)
+        train = slice_dataset_by_section(train, config.train_curriculum)
         validation = slice_dataset_by_section(validation)
     return train, validation
 
 
-def slice_dataset_by_section(dataset: Any) -> Any:
+def slice_dataset_by_section(dataset: Any, curriculum: str = "none") -> Any:
     """Replace whole-document rows with notebook-equivalent section rows."""
 
-    return dataset.map(
+    sliced = dataset.map(
         slice_batch_by_section,
         batched=True,
         with_indices=True,
         remove_columns=dataset.column_names,
         desc="Slicing each decision into gold-span section examples",
     )
+    if curriculum == "none":
+        return sliced
+    if curriculum != HARD_FIRST_CURRICULUM:
+        raise ValueError(f"Unknown training curriculum {curriculum!r}")
+    order = hard_first_order_indices(
+        sliced["section"],
+        sliced["corpus"],
+        sliced["parent_id"],
+        sliced["is_empty"],
+    )
+    return sliced.select(order)
 
 
 def format_messages(

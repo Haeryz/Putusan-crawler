@@ -12,6 +12,7 @@ from trainer.sft.checkpoint import (
     artifact_checkpoint_step,
     latest_checkpoint,
     restore_checkpoint_artifact,
+    write_checkpoint_metadata,
 )
 from trainer.sft.config import MODEL_PROFILES, run_config_for_model
 from trainer.sft.tracking import (
@@ -132,6 +133,25 @@ def test_restore_checkpoint_artifact_creates_complete_atomic_directory(
     assert latest_checkpoint(tmp_path) == restored
     assert (restored / "optimizer.pt").is_file()
     assert not list(tmp_path.glob(".wandb-checkpoint-*"))
+
+
+def test_curriculum_checkpoint_requires_matching_local_identity(tmp_path) -> None:
+    checkpoint = tmp_path / "checkpoint-20"
+    checkpoint.mkdir()
+    (checkpoint / "trainer_state.json").write_text(
+        json.dumps({"global_step": 20}), encoding="utf-8"
+    )
+    required = {"train_curriculum": "hard_sections_first_v1"}
+
+    assert latest_checkpoint(tmp_path, required) is None
+
+    write_checkpoint_metadata(
+        checkpoint, {"train_curriculum": "random_legacy_order"}
+    )
+    assert latest_checkpoint(tmp_path, required) is None
+
+    write_checkpoint_metadata(checkpoint, required)
+    assert latest_checkpoint(tmp_path, required) == checkpoint
 
 
 def test_restore_quarantines_incomplete_same_step_directory(tmp_path) -> None:

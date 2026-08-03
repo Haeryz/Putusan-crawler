@@ -116,6 +116,17 @@ def test_cli_accepts_training_overrides() -> None:
     assert config.tracking.upload_checkpoints is True
 
 
+def test_cli_can_disable_all_evaluation_for_short_deepseek_run() -> None:
+    args = build_parser().parse_args(
+        ["--model", "deepseek", "--max-steps", "300", "--no-eval"]
+    )
+    config = config_from_args(args)
+
+    assert config.training.max_steps == 300
+    assert config.training.eval_strategy == "no"
+    assert config.training.train_sampling_strategy == "sequential"
+
+
 def test_modelname_alias_selects_one_full_training_profile() -> None:
     args = build_parser().parse_args(["--modelname", "deepseek"])
     config = config_from_args(args)
@@ -126,6 +137,13 @@ def test_modelname_alias_selects_one_full_training_profile() -> None:
     )
     assert config.training.max_steps == -1
     assert config.training.num_train_epochs == 1.0
+    assert config.data.train_curriculum == "hard_sections_first_v1"
+    assert config.training.train_sampling_strategy == "sequential"
+    assert config.training.per_device_train_batch_size == 24
+    assert config.training.gradient_accumulation_steps == 1
+    assert config.training.learning_rate == pytest.approx(2e-4)
+    assert config.model.lora_rank == 32
+    assert config.model.lora_alpha == 32
     assert config.tracking.upload_adapter is True
 
 
@@ -207,7 +225,11 @@ def test_trainer_saves_resumable_state_every_configured_steps(
         [1],
         [2],
         max_length=256,
-        config=TrainingConfig(save_steps=5, eval_steps=10),
+        config=TrainingConfig(
+            save_steps=5,
+            eval_steps=10,
+            train_sampling_strategy="sequential",
+        ),
         model_config=ModelConfig(),
     )
 
@@ -219,7 +241,8 @@ def test_trainer_saves_resumable_state_every_configured_steps(
     assert sft_config["num_train_epochs"] == 1.0
     assert sft_config["max_steps"] == -1
     assert sft_config["max_length"] == 256
-    assert sft_config["train_sampling_strategy"] == "group_by_length"
+    assert sft_config["train_sampling_strategy"] == "sequential"
+    assert sft_config["eval_strategy"] == "steps"
     assert sft_config["auto_find_batch_size"] is True
     assert captured["trainer_kwargs"]["processing_class"].truncation_side == "right"
 

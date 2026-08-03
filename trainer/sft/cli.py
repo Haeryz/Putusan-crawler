@@ -114,13 +114,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional step limit for smoke/debug runs; overrides epoch count",
     )
-    parser.add_argument(
+    eval_group = parser.add_mutually_exclusive_group()
+    eval_group.add_argument(
         "--eval-steps",
         type=positive_int,
         default=defaults.training.eval_steps,
         help="Explicitly run validation every N optimizer steps",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--evaluations-per-epoch",
         type=positive_int,
         default=None,
@@ -128,6 +129,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Use automatic validation cadence instead of the fixed "
             "--eval-steps interval"
         ),
+    )
+    eval_group.add_argument(
+        "--no-eval",
+        action="store_true",
+        help="Disable periodic and end-of-training validation",
     )
     parser.add_argument(
         "--save-steps",
@@ -241,6 +247,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
                 if args.evaluations_per_epoch is not None
                 else args.eval_steps
             ),
+            eval_strategy="no" if args.no_eval else "steps",
             evaluations_per_epoch=(
                 args.evaluations_per_epoch
                 if args.evaluations_per_epoch is not None

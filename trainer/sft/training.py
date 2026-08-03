@@ -20,7 +20,7 @@ def build_trainer(
 ) -> Any:
     """Create the notebook-equivalent trainer and mask prompt tokens."""
 
-    if config.eval_steps is None:
+    if config.eval_strategy == "steps" and config.eval_steps is None:
         raise ValueError("eval_steps must be resolved before building the trainer")
     os.environ["UNSLOTH_RETURN_LOGITS"] = "0"
     from trl import SFTConfig, SFTTrainer
@@ -52,13 +52,11 @@ def build_trainer(
         report_to=config.report_to,
         max_length=max_length,
         packing=False,
-        # Transformers 5.5 replaced the group_by_length boolean with an
-        # explicit sampler selector.
-        train_sampling_strategy="group_by_length",
+        train_sampling_strategy=config.train_sampling_strategy,
         auto_find_batch_size=True,
         bf16=True,
         fp16=False,
-        eval_strategy="steps",
+        eval_strategy=config.eval_strategy,
         eval_steps=config.eval_steps,
         save_strategy="steps",
         save_steps=config.save_steps,

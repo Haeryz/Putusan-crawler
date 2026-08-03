@@ -56,7 +56,9 @@ def build_training_command(
         command.extend(("--num-train-epochs", str(args.num_train_epochs)))
     if args.max_steps is not None:
         command.extend(("--max-steps", str(args.max_steps)))
-    if args.evaluations_per_epoch is not None:
+    if args.no_eval:
+        command.append("--no-eval")
+    elif args.evaluations_per_epoch is not None:
         command.extend(
             ("--evaluations-per-epoch", str(args.evaluations_per_epoch))
         )
@@ -124,13 +126,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=positive_int,
         help="Optional step limit for smoke/debug runs",
     )
-    parser.add_argument(
+    eval_group = parser.add_mutually_exclusive_group()
+    eval_group.add_argument(
         "--eval-steps", type=positive_int, default=38,
         help="Explicitly run validation every N optimizer steps",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--evaluations-per-epoch", type=positive_int, default=None,
         help="Use automatic cadence instead of the fixed --eval-steps interval",
+    )
+    eval_group.add_argument(
+        "--no-eval", action="store_true",
+        help="Disable periodic and end-of-training validation",
     )
     parser.add_argument(
         "--save-steps", type=positive_int, default=50,

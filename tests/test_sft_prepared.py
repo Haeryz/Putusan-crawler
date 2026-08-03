@@ -31,6 +31,7 @@ def test_prepared_manifest_binds_model_dataset_slicing_and_context() -> None:
     validate_prepared_manifest(manifest, config)
     assert manifest["base_model"] == "google/gemma-4-E2B-it"
     assert manifest["section_slicing"] is True
+    assert manifest["train_curriculum"] == "none"
     assert manifest["max_length"] == 8_192
 
 
@@ -44,6 +45,19 @@ def test_prepared_manifest_rejects_wrong_model() -> None:
     )
 
     with pytest.raises(RuntimeError, match="incompatible"):
+        validate_prepared_manifest(manifest, deepseek)
+
+
+def test_deepseek_rejects_prepared_artifact_without_hard_first_order() -> None:
+    deepseek = run_config_for_model(MODEL_PROFILES["deepseek"])
+    manifest = prepared_manifest(
+        deepseek, 8_192, 31, 31,
+        {"p50": 1, "p90": 1, "p95": 1, "maximum": 1,
+         "max_length": 8_192, "coverage": 1.0},
+    )
+    manifest.pop("train_curriculum")
+
+    with pytest.raises(RuntimeError, match="train_curriculum"):
         validate_prepared_manifest(manifest, deepseek)
 
 

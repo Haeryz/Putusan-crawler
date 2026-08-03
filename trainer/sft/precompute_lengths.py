@@ -220,7 +220,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             train_dataset = train_source
             validation_dataset = validation_source
             if config.data.slice_by_section:
-                train_dataset = slice_dataset_by_section(train_dataset)
+                train_dataset = slice_dataset_by_section(
+                    train_dataset, config.data.train_curriculum
+                )
                 validation_dataset = slice_dataset_by_section(validation_dataset)
             train_dataset = format_dataset(
                 train_dataset, tokenizer_or_processor, model_config

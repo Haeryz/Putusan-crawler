@@ -82,6 +82,11 @@ python -m trainer.sft.precompute_dataset
 The pod then restores model-specific prepared artifacts from W&B and skips all
 dataset tokenization. If the startup log says `falling back to local
 preparation`, the prepared artifact was not found or did not match the model.
+DeepSeek's prepared artifact is ordered with the deterministic
+`hard_sections_first_v1` curriculum and is consumed with a sequential sampler;
+its batch size, accumulation, LR, optimizer, and LoRA settings are unchanged.
+Run the short no-evaluation profile with
+`python -m trainer.sft --model deepseek --max-steps 300 --no-eval`.
 
 Detach with `Ctrl+B`, then `D`; reattach with:
 

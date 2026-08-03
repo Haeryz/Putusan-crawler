@@ -14,7 +14,12 @@ from trainer.sft.data import (
     tokenize_response_only_text,
     truncate_text_preserving_response,
 )
-from trainer.sft.section_slicing import SECTION_GUIDANCE, slice_row_by_section
+from trainer.sft.section_slicing import (
+    SECTION_DIFFICULTY_TIERS,
+    SECTION_GUIDANCE,
+    hard_first_order_indices,
+    slice_row_by_section,
+)
 
 
 class FakeTokenizer:
@@ -75,6 +80,48 @@ def test_notebook_section_slicing_emits_one_gold_span_example_per_section() -> N
     assert '"judul": ["P U T U S A N", "PUTUSAN"]' in judul["answer"]
     assert children[1]["is_empty"] is True
     assert '"empty_sections": ["nomor_putusan"]' in children[1]["answer"]
+
+
+def test_hard_first_curriculum_covers_every_section_once() -> None:
+    ordered = [section for tier in SECTION_DIFFICULTY_TIERS for section in tier]
+
+    assert len(ordered) == 31
+    assert set(ordered) == set(SECTION_GUIDANCE)
+    assert ordered[:2] == ["penangkapan", "fakta_hukum"]
+    assert ordered.index("irah_irah") > ordered.index("pertimbangan_hukum")
+    assert ordered.index("tanggal") > ordered.index("dakwaan")
+
+
+def test_hard_first_order_is_nonrandom_balanced_and_positive_first() -> None:
+    rows = [
+        # Source storage is corpus-blocked. Curriculum output must round-robin.
+        ("irah_irah", "Anak", "a1", False),
+        ("fakta_hukum", "Anak", "a1", False),
+        ("penangkapan", "Anak", "a1", False),
+        ("penangkapan", "Anak", "a2", True),
+        ("fakta_hukum", "Asusila", "s1", False),
+        ("penangkapan", "Asusila", "s1", False),
+        ("fakta_hukum", "TPPO", "t1", False),
+        ("penangkapan", "TPPO", "t1", False),
+        ("tanggal", "TPPO", "t1", False),
+    ]
+    columns = list(zip(*rows, strict=True))
+
+    first = hard_first_order_indices(*columns)
+    second = hard_first_order_indices(*columns)
+    ordered = [rows[index] for index in first]
+
+    assert first == second
+    assert [(row[1], row[0]) for row in ordered[:6]] == [
+        ("Anak", "penangkapan"),
+        ("Anak", "fakta_hukum"),
+        ("Asusila", "penangkapan"),
+        ("Asusila", "fakta_hukum"),
+        ("TPPO", "penangkapan"),
+        ("TPPO", "fakta_hukum"),
+    ]
+    assert ordered[6][:3] == ("penangkapan", "Anak", "a2")
+    assert [row[0] for row in ordered[-2:]] == ["irah_irah", "tanggal"]
 
 
 def test_format_messages_renders_each_conversation() -> None:

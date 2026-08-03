@@ -7,6 +7,8 @@ import math
 from pathlib import Path
 from typing import Literal
 
+from .section_slicing import HARD_FIRST_CURRICULUM
+
 
 LoaderKind = Literal["fast_language_model", "fast_model"]
 LoraKind = Literal["language_peft", "multimodal_language_only"]
@@ -142,6 +144,7 @@ class DataConfig:
     distributed_cache_timeout_seconds: int = 3_600
     slice_by_section: bool = False
     section_slicing_version: int = 1
+    train_curriculum: str = "none"
 
 
 @dataclass(frozen=True)
@@ -159,6 +162,7 @@ class TrainingConfig:
     logging_steps: int = 1
     eval_steps: int | None = 38
     evaluations_per_epoch: int = 4
+    eval_strategy: str = "steps"
     save_steps: int = 50
     weight_decay: float = 0.001
     seed: int = 3407
@@ -166,6 +170,7 @@ class TrainingConfig:
     minimum_response_retention: float = 0.94
     dataloader_num_workers: int = 4
     dataloader_prefetch_factor: int = 2
+    train_sampling_strategy: str = "group_by_length"
 
     def effective_batch_size(self, world_size: int) -> int:
         """Return the number of examples contributing to each optimizer step."""
@@ -265,12 +270,22 @@ def run_config_for_model(model: ModelConfig) -> RunConfig:
             cache_dir=Path(f"{local_root}/cache"),
             prepared_dir=Path(f"{local_root}/prepared-dataset"),
             slice_by_section=section_slicing,
+            train_curriculum=(
+                HARD_FIRST_CURRICULUM
+                if model.profile_name == "deepseek"
+                else "none"
+            ),
         ),
         training=TrainingConfig(
             output_dir=Path(f"{local_root}/checkpoints"),
             adapter_dir=Path(f"{local_root}/lora"),
             per_device_train_batch_size=batch_size,
             gradient_accumulation_steps=accumulation,
+            train_sampling_strategy=(
+                "sequential"
+                if model.profile_name == "deepseek"
+                else "group_by_length"
+            ),
         ),
         tracking=TrackingConfig(
             artifact_name=f"{artifact_slug}-lora",

@@ -7,12 +7,42 @@ import os
 from pathlib import Path
 import re
 import tempfile
-from typing import Any
+from typing import Any, Mapping
 
 from .config import ModelConfig
 
 
-def latest_checkpoint(output_dir: Path) -> Path | None:
+CHECKPOINT_METADATA_NAME = "sinergi_checkpoint.json"
+
+
+def _checkpoint_metadata_matches(
+    path: Path, required_metadata: Mapping[str, Any] | None
+) -> bool:
+    if not required_metadata:
+        return True
+    metadata_path = path / CHECKPOINT_METADATA_NAME
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return all(metadata.get(key) == value for key, value in required_metadata.items())
+
+
+def write_checkpoint_metadata(
+    checkpoint_dir: Path, metadata: Mapping[str, Any]
+) -> None:
+    """Bind a local Trainer checkpoint to its dataset/sampling identity."""
+
+    (checkpoint_dir / CHECKPOINT_METADATA_NAME).write_text(
+        json.dumps(dict(metadata), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def latest_checkpoint(
+    output_dir: Path,
+    required_metadata: Mapping[str, Any] | None = None,
+) -> Path | None:
     """Return the highest-numbered complete Trainer checkpoint, if any."""
 
     if not output_dir.is_dir():
@@ -28,7 +58,10 @@ def latest_checkpoint(output_dir: Path) -> Path | None:
         # Trainer writes this after the model, optimizer, scheduler, and RNG
         # state. Ignoring directories without it avoids resuming a save that
         # was interrupted halfway through.
-        if (path / "trainer_state.json").is_file():
+        if (
+            (path / "trainer_state.json").is_file()
+            and _checkpoint_metadata_matches(path, required_metadata)
+        ):
             candidates.append((step, path))
     if not candidates:
         return None

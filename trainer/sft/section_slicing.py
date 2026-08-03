@@ -8,6 +8,7 @@ section's annotated source spans.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any, Mapping, Sequence
 import json
 
@@ -65,6 +66,136 @@ CORPUS_ADDENDA = {
     "Asusila": "Korpus Asusila/Pidana Biasa: subjek adalah Terdakwa/Para Terdakwa. Pertahankan semua identitas, bentuk dakwaan, dan tahap penahanan berurutan.",
     "TPPO": "Korpus TPPO: pertahankan semua Terdakwa, tahap penahanan, restitusi, disposisi barang bukti, dan perintah amar berurutan.",
 }
+
+
+HARD_FIRST_CURRICULUM = "hard_sections_first_v1"
+SECTION_DIFFICULTY_TIERS: tuple[tuple[str, ...], ...] = (
+    (
+        "penangkapan",
+        "fakta_hukum",
+        "pertimbangan_hukum",
+        "dakwaan",
+        "tuntutan",
+        "saksi",
+        "terdakwa",
+        "penahanan",
+        "amar_putusan",
+        "petunjuk_barang_bukti",
+        "surat",
+        "ahli",
+    ),
+    (
+        "keterangan_perkara",
+        "siapa_yang_memutus",
+        "panitera_pengganti",
+        "tanda_tangan_majelis",
+        "nama_pengadilan_negeri",
+    ),
+    (
+        "judul",
+        "nomor_putusan",
+        "irah_irah",
+        "nama_lengkap",
+        "tempat_lahir",
+        "umur_tanggal_lahir",
+        "jenis_kelamin",
+        "kebangsaan",
+        "tempat_tinggal",
+        "agama",
+        "pekerjaan",
+        "hari",
+        "tanggal",
+        "tahun",
+    ),
+)
+
+
+def _section_curriculum_positions() -> dict[str, tuple[int, int]]:
+    positions = {
+        section: (tier, position)
+        for tier, sections in enumerate(SECTION_DIFFICULTY_TIERS)
+        for position, section in enumerate(sections)
+    }
+    if set(positions) != set(SECTION_GUIDANCE):
+        missing = sorted(set(SECTION_GUIDANCE) - set(positions))
+        extra = sorted(set(positions) - set(SECTION_GUIDANCE))
+        raise RuntimeError(
+            f"Section curriculum mismatch: missing={missing}, extra={extra}"
+        )
+    return positions
+
+
+SECTION_CURRICULUM_POSITIONS = _section_curriculum_positions()
+
+
+def hard_first_order_indices(
+    sections: Sequence[str],
+    corpora: Sequence[str],
+    parent_ids: Sequence[str],
+    is_empty: Sequence[bool],
+) -> list[int]:
+    """Return a stable hard-first, corpus-balanced curriculum permutation.
+
+    Within each difficulty tier, positive examples precede empty examples.
+    Parent decisions are then round-robined across corpora, and every section
+    in the tier is visited for a parent before moving to the next round. This
+    avoids both random sampling and a first-corpus/first-section bias on short
+    runs.
+    """
+
+    size = len(sections)
+    if not (len(corpora) == len(parent_ids) == len(is_empty) == size):
+        raise ValueError("Curriculum metadata columns have different lengths")
+
+    corpus_positions = {name: index for index, name in enumerate(CORPUS_ADDENDA)}
+    parent_rounds: dict[tuple[str, str], int] = {}
+    next_parent_round: Counter[str] = Counter()
+    row_parent_rounds: list[int] = []
+    for corpus, parent_id in zip(corpora, parent_ids, strict=True):
+        if corpus not in corpus_positions:
+            raise ValueError(f"Unknown corpus {corpus!r}")
+        key = (corpus, parent_id)
+        if key not in parent_rounds:
+            parent_rounds[key] = next_parent_round[corpus]
+            next_parent_round[corpus] += 1
+        row_parent_rounds.append(parent_rounds[key])
+
+    def ordering_key(index: int) -> tuple[int, int, int, int, int, int]:
+        try:
+            tier, section_position = SECTION_CURRICULUM_POSITIONS[sections[index]]
+        except KeyError as error:
+            raise ValueError(f"Unknown section {sections[index]!r}") from error
+        return (
+            tier,
+            int(bool(is_empty[index])),
+            row_parent_rounds[index],
+            corpus_positions[corpora[index]],
+            section_position,
+            index,
+        )
+
+    return sorted(range(size), key=ordering_key)
+
+
+def hard_first_indices_for_source_rows(
+    rows: Sequence[Mapping[str, Any]],
+) -> list[int]:
+    """Map a legacy parent-major sliced dataset into curriculum order."""
+
+    sections: list[str] = []
+    corpora: list[str] = []
+    parent_ids: list[str] = []
+    empty: list[bool] = []
+    for source_index, row in enumerate(rows):
+        target_sections = _target_sections(row.get("target_json"))
+        corpus = str(row.get("corpus", ""))
+        parent_id = str(row.get("id", row.get("parent_id", source_index)))
+        for section in SECTION_GUIDANCE:
+            sections.append(section)
+            corpora.append(corpus)
+            parent_ids.append(parent_id)
+            empty.append(not bool(target_sections[section]))
+    return hard_first_order_indices(sections, corpora, parent_ids, empty)
 
 
 def _target_sections(value: Any) -> Mapping[str, Sequence[str]]:

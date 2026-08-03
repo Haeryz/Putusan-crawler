@@ -12,6 +12,7 @@ from .checkpoint import (
     checkpoint_step,
     latest_checkpoint,
     restore_checkpoint_artifact,
+    write_checkpoint_metadata,
 )
 from .config import RunConfig, TrackingConfig
 
@@ -44,8 +45,21 @@ def _checkpoint_matches_run(artifact: Any, config: RunConfig) -> bool:
         "base_model": config.model.model_name,
         "dataset": config.data.repository,
         "dataset_config": config.data.subset,
+        "train_curriculum": config.data.train_curriculum,
     }
-    return all(metadata.get(key) == value for key, value in expected.items())
+    return all(
+        metadata.get(key, "none" if key == "train_curriculum" else None)
+        == value
+        for key, value in expected.items()
+    )
+
+
+def required_local_checkpoint_metadata(config: RunConfig) -> dict[str, Any] | None:
+    """Require curriculum identity only for order-sensitive training runs."""
+
+    if config.data.train_curriculum == "none":
+        return None
+    return {"train_curriculum": config.data.train_curriculum}
 
 
 def find_newest_wandb_checkpoint(
@@ -97,7 +111,10 @@ def restore_newest_wandb_checkpoint(
 ) -> Path | None:
     """Restore W&B only when its newest compatible step beats local state."""
 
-    local = latest_checkpoint(config.training.output_dir)
+    local = latest_checkpoint(
+        config.training.output_dir,
+        required_local_checkpoint_metadata(config),
+    )
     local_step = checkpoint_step(local)
     remote = find_newest_wandb_checkpoint(run, config)
     if remote is None:
@@ -324,6 +341,7 @@ def checkpoint_upload_callback(
             checkpoint_dir = (
                 Path(args.output_dir) / f"checkpoint-{state.global_step}"
             )
+            write_checkpoint_metadata(checkpoint_dir, metadata)
             logged = log_checkpoint_artifact(
                 run,
                 checkpoint_dir,

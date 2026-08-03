@@ -21,6 +21,7 @@ def runner_args(**overrides) -> Namespace:
         "max_steps": None,
         "eval_steps": 38,
         "evaluations_per_epoch": None,
+        "no_eval": False,
         "save_steps": 5,
         "gpu_count": 1,
         "per_device_batch_size": 1,
@@ -65,6 +66,16 @@ def test_sequential_command_passes_half_epoch_preset() -> None:
 
     assert "--half-epoch" in command
     assert "--num-train-epochs" not in command
+
+
+def test_sequential_command_can_disable_evaluation() -> None:
+    command = build_training_command(
+        "deepseek", runner_args(max_steps=300, no_eval=True)
+    )
+
+    assert command[command.index("--max-steps") + 1] == "300"
+    assert "--no-eval" in command
+    assert "--eval-steps" not in command
 
 
 def test_hub_config_modality_inference_distinguishes_three_architectures() -> None:

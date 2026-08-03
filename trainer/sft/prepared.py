@@ -28,6 +28,7 @@ def prepared_manifest(
         "subset": config.data.subset,
         "section_slicing": config.data.slice_by_section,
         "section_slicing_version": config.data.section_slicing_version,
+        "train_curriculum": config.data.train_curriculum,
         "max_length": max_length,
         "train_rows": train_rows,
         "validation_rows": validation_rows,
@@ -45,11 +46,13 @@ def validate_prepared_manifest(
         "subset": config.data.subset,
         "section_slicing": config.data.slice_by_section,
         "section_slicing_version": config.data.section_slicing_version,
+        "train_curriculum": config.data.train_curriculum,
     }
     mismatches = {
         key: (manifest.get(key), value)
         for key, value in expected.items()
-        if manifest.get(key) != value
+        if manifest.get(key, "none" if key == "train_curriculum" else None)
+        != value
     }
     if mismatches:
         raise RuntimeError(f"Prepared dataset is incompatible: {mismatches}")

@@ -194,6 +194,26 @@ tokenize, or mask it again. Only artifact download, model loading, and training
 remain. If an artifact is missing or incompatible, the trainer clearly reports
 that and falls back to local preparation rather than silently using bad IDs.
 
+DeepSeek uses the deterministic `hard_sections_first_v1` curriculum and TRL's
+sequential sampler. Non-empty complex sections (`penangkapan`, `fakta_hukum`,
+`pertimbangan_hukum`, `dakwaan`, `tuntutan`, testimony, detention, evidence,
+and the judgment order) are consumed before headers, dates, and identity
+fields. Rows are round-robined across Anak, Asusila, and TPPO so a short
+`--max-steps` run does not train on only the first corpus. Gemma and Qwen retain
+their existing length-grouped sampling and all model profiles retain their
+existing batch, optimizer, LR, and LoRA hyperparameters.
+
+For the intended 300-step DeepSeek run with no periodic or forced final
+validation, use:
+
+```bash
+python -m trainer.sft --model deepseek --max-steps 300 --no-eval
+```
+
+The prepared manifest and every new DeepSeek checkpoint record the curriculum
+identity. A legacy randomized DeepSeek artifact/checkpoint is incompatible and
+will not be resumed into the sequential curriculum.
+
 Every run automatically scans all versions of that model's configured W&B
 checkpoint collection. It filters by base model, dataset, and dataset config,
 compares the highest remote step with the highest complete local
